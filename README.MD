@@ -6,71 +6,123 @@ AI 기반 맞춤형 한국 여행 계획 생성 및 Notion 연동 서비스
 
 OpenAI GPT-4를 활용하여 사용자의 자연어 요청을 30분 단위의 상세한 여행 일정으로 변환하는 시스템입니다. 실제 장소 정보, 대중교통 경로, 비용 정보를 포함한 현실적인 여행 계획을 제공하며, Notion에 자동으로 저장됩니다.
 
-## 🏗️ 시스템 아키텍처
+## 🏗️ 시스템 아키텍처 (8단계 최적화 버전)
 
 ```mermaid
 graph TB
     subgraph "🌐 Frontend"
         UI[Web Interface<br/>HTML/CSS/JS]
-        MAP[Google Maps<br/>최적 경로 표시]
+        MAP[Google Maps UI<br/>최적 동선 표시]
     end
     
     subgraph "🔧 Backend API"
         FAST[FastAPI Server<br/>Port 8000]
-        ROUTER[API Router<br/>endpoints.py]
+        ROUTER[API Router<br/>8단계 프로세스]
     end
     
-    subgraph "🤖 AI Services"
-        OPENAI[OpenAI GPT-4<br/>여행 계획 생성]
-        PROMPT[Prompt Engineering<br/>30분 단위 일정]
+    subgraph "🔍 1단계: 크롤링 & 캐시"
+        CACHE[Crawl Cache<br/>1개월 데이터 보관]
+        CRAWLER[Enhanced Crawler<br/>중복 방지 크롤링]
+    end
+    
+    subgraph "🌦️ 2단계: 날씨 분석"
+        WEATHER_API[Weather API<br/>지정 일자 날씨]
+        WEATHER_FILTER[Weather Filter<br/>날씨 기반 필터링]
+    end
+    
+    subgraph "🤖 3단계: AI 분석"
+        AI_ANALYZER[AI Analyzer<br/>날씨+장소 종합 분석]
+        RECOMMENDATION[Smart Recommendation<br/>최적 장소 추천]
+    end
+    
+    subgraph "✅ 4단계: 검증"
+        VERIFIER[Place Verifier<br/>할루시네이션 제거]
+        VALIDATOR[Existence Validator<br/>실제 장소 확인]
+    end
+    
+    subgraph "🗺️ 5단계: 동선 최적화"
+        ROUTE_OPT[Route Optimizer<br/>최적 경로 계산]
+        DISTRICT[District Manager<br/>장기여행 구역별 분할]
     end
     
     subgraph "🔗 External APIs"
-        NAVER[Naver API<br/>블로그 검색 & 장소 검증]
-        GMAPS[Google Maps API<br/>지도 및 경로]
-        NOTION[Notion API<br/>자동 문서화]
-        WEATHER[Weather API<br/>실시간 날씨]
-        TRANSPORT[Seoul Transport API<br/>실시간 대중교통]
+        NAVER[Naver API]
+        GMAPS[Google Maps API]
+        WEATHER[Weather API]
+        NOTION[Notion API]
     end
     
-    subgraph "📊 Data Processing"
-        BLOG[Blog Crawler<br/>실제 후기 크롤링]
-        VERIFY[Place Verification<br/>장소 검증]
-        QUALITY[Quality Service<br/>품질 평가]
-        ROUTE[Route Optimizer<br/>동선 최적화]
+    subgraph "💾 Database"
+        POSTGRES[(PostgreSQL<br/>캐시 데이터)]
     end
     
     UI --> FAST
-    MAP --> GMAPS
     FAST --> ROUTER
-    ROUTER --> OPENAI
-    OPENAI --> PROMPT
-    ROUTER --> NAVER
-    ROUTER --> GMAPS
-    ROUTER --> NOTION
-    ROUTER --> WEATHER
-    ROUTER --> TRANSPORT
-    ROUTER --> BLOG
-    ROUTER --> VERIFY
-    ROUTER --> QUALITY
-    ROUTER --> ROUTE
     
-    style UI fill:#e1f5fe
-    style FAST fill:#f3e5f5
-    style OPENAI fill:#fff3e0
-    style NOTION fill:#e8f5e8
+    ROUTER --> CACHE
+    CACHE --> CRAWLER
+    CRAWLER --> NAVER
+    
+    ROUTER --> WEATHER_API
+    WEATHER_API --> WEATHER
+    WEATHER_API --> WEATHER_FILTER
+    
+    WEATHER_FILTER --> AI_ANALYZER
+    CRAWLER --> AI_ANALYZER
+    AI_ANALYZER --> RECOMMENDATION
+    
+    RECOMMENDATION --> VERIFIER
+    VERIFIER --> VALIDATOR
+    
+    VALIDATOR --> ROUTE_OPT
+    ROUTE_OPT --> DISTRICT
+    DISTRICT --> GMAPS
+    
+    CACHE --> POSTGRES
+    ROUTE_OPT --> MAP
+    
+    style CACHE fill:#e8f5e8
+    style WEATHER_FILTER fill:#e3f2fd
+    style AI_ANALYZER fill:#fff3e0
+    style VERIFIER fill:#fce4ec
+    style ROUTE_OPT fill:#f3e5f5
 ```
 
 ## ✨ 주요 기능
 
-### 🎯 핵심 기능
-- **AI 기반 여행 계획**: GPT-4를 활용한 맞춤형 일정 생성
-- **30분 단위 상세 일정**: 정확한 시간과 소요시간 계산
-- **실제 장소 검증**: 존재하는 맛집/관광지만 추천
-- **블로그 내용 크롤링**: 실제 후기 분석 및 감정 분석
-- **실시간 대중교통**: 버스/지하철 도착시간, 혼잡도
-- **지도 연동**: Google Maps 최적 경로 표시
-- **Notion 자동 저장**: 생성된 계획을 문서로 저장
+### 🎯 8단계 최적화 기능
+
+**1단계: 스마트 크롤링**
+- 프롬프트 분석 후 네이버 검색으로 실제 장소 먼저 수집
+- 1개월 캐시로 중복 크롤링 방지 (리소스 절약)
+
+**2단계: 날씨 기반 필터링**
+- 지정된 일자의 날씨 API 연동
+- 비오는 날: 실내 장소 우선, 맑은 날: 야외 활동 추천
+
+**3단계: AI 종합 분석**
+- 장소 데이터 + 날씨 정보 + 사용자 선호도 종합 분석
+- GPT-4가 최적 장소 조합 추천
+
+**4단계: 할루시네이션 제거**
+- 추천된 장소들의 실제 존재 여부 재검증
+- 네이버 + 구글 교차 검증으로 신뢰도 향상
+
+**5단계: 최적 동선 계산**
+- Google Maps API로 최단 경로 및 이동시간 계산
+- 구역별 클러스터링으로 효율적 동선 구성
+
+**6단계: Google Maps UI 반영**
+- 웹 인터페이스에 실시간 지도 및 경로 표시
+- 마커, 경로 라인, 이동시간 정보 제공
+
+**7단계: 장기여행 구역별 세분화**
+- 2일 이상 여행시 구역별 관광지/맛집/호텔 추가 크롤링
+- 일자별 최적 구역 배치로 효율적 여행 계획
+
+**8단계: 지능형 캐시 시스템**
+- PostgreSQL DB에 크롤링 데이터 1개월간 보관
+- 동일 검색 시 캐시 데이터 활용으로 응답속도 향상
 
 ### 🌟 고급 기능
 - **날씨 기반 추천**: 실시간 날씨에 따른 실내/실외 활동 조정
@@ -158,35 +210,59 @@ travel-recommend-korea/
     └── QUICK_START.md       # 빠른 시작 가이드
 ```
 
-## 🔄 데이터 플로우
+## 🔄 데이터 플로우 (8단계 최적화)
 
 ```mermaid
 sequenceDiagram
     participant U as 👤 사용자
     participant F as 🌐 Frontend
     participant A as 🔧 API Server
-    participant AI as 🤖 OpenAI
-    participant N as 📝 Naver
+    participant C as 💾 Cache DB
+    participant N as 📝 Naver API
+    participant W as 🌦️ Weather API
+    participant AI as 🤖 AI Analyzer
+    participant V as ✅ Verifier
     participant G as 🗺️ Google Maps
-    participant B as 📝 Blog Crawler
-    participant NO as 📄 Notion
     
-    U->>F: 여행 요청 입력
+    U->>F: 여행 요청 + 일자 입력
     F->>A: POST /api/travel/plan
-    A->>AI: 상세 일정 생성 요청
-    AI-->>A: 30분 단위 JSON 응답
     
-    par 병렬 처리
-        A->>N: 장소 검증 & 블로그 검색
-        A->>G: 경로 최적화 & 지도 정보
-        A->>B: 블로그 내용 크롤링
+    Note over A,C: 1단계: 캐시 확인 & 크롤링
+    A->>C: 캐시된 데이터 확인
+    alt 캐시 있음
+        C-->>A: 캐시된 장소 데이터
+    else 캐시 없음
+        A->>N: 지역+키워드 크롤링
+        N-->>A: 신규 장소 데이터
+        A->>C: 1개월 캐시 저장
     end
     
-    A->>NO: 백그라운드 저장
-    A-->>F: 구조화된 여행 계획
-    F->>G: 지도에 경로 표시
-    F-->>U: 완성된 여행 계획
-    NO-->>F: 저장 완료 알림
+    Note over A,W: 2단계: 날씨 기반 필터링
+    A->>W: 지정 일자 날씨 조회
+    W-->>A: 일자별 날씨 예보
+    A->>A: 날씨 기반 장소 필터링
+    
+    Note over A,AI: 3단계: AI 분석 & 추천
+    A->>AI: 장소+날씨+프롬프트 종합 분석
+    AI-->>A: 최적 장소 추천 목록
+    
+    Note over A,V: 4단계: 검증 & 할루시네이션 제거
+    A->>V: 추천 장소 실제 존재 검증
+    V-->>A: 검증된 장소 목록
+    
+    Note over A,G: 5-6단계: 동선 최적화 & UI 반영
+    A->>G: 최적 경로 계산 요청
+    G-->>A: 최적화된 동선 데이터
+    
+    Note over A,A: 7단계: 장기여행 구역별 분할
+    alt 장기 여행 (2일+)
+        A->>A: 구역별 관광지/맛집/호텔 추가 크롤링
+        A->>C: 구역별 데이터 캐시 저장
+    end
+    
+    A-->>F: 완성된 8단계 여행 계획
+    F->>G: Google Maps UI에 동선 표시
+    F-->>U: 최적화된 여행 계획
 ```
 
 ## 🎨 사용법

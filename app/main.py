@@ -19,6 +19,7 @@ except ImportError:
     pass
 
 from app.api.endpoints import router as api_router
+from app.api.user_endpoints import router as user_router
 
 # FastAPI 앱 생성
 app = FastAPI(
@@ -40,6 +41,7 @@ app.add_middleware(
 
 # API 라우터 등록
 app.include_router(api_router, prefix="/api/travel", tags=["travel"])
+app.include_router(user_router, prefix="/api/users", tags=["users"])
 
 def get_frontend_path():
     return os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")

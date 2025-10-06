@@ -12,6 +12,20 @@
     <div class="container mx-auto px-4 py-8">
         <!-- Header -->
         <div class="text-center mb-8">
+            <div class="flex justify-between items-center mb-4">
+                <div></div>
+                <div id="authButtons" class="space-x-2">
+                    <a href="login.html" class="px-4 py-2 text-blue-600 border border-blue-600 rounded hover:bg-blue-50">로그인</a>
+                    <a href="register.html" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">회원가입</a>
+                </div>
+                <div id="userInfo" class="hidden space-x-2">
+                    <a href="history.html" class="px-4 py-2 text-blue-600 border border-blue-600 rounded hover:bg-blue-50">
+                        <i class="fas fa-history mr-1"></i>내 여행
+                    </a>
+                    <span id="userName" class="text-gray-700"></span>
+                    <button id="logoutBtn" class="px-4 py-2 text-red-600 border border-red-600 rounded hover:bg-red-50">로그아웃</button>
+                </div>
+            </div>
             <h1 class="text-4xl font-bold text-gray-800 mb-2">🇰🇷 스마트 한국 여행 플래너</h1>
             <p class="text-gray-600">AI가 추천하는 맞춤형 한국 여행 계획</p>
         </div>
@@ -246,15 +260,38 @@
                         <div id="weatherContent" class="space-y-2"></div>
                     </div>
 
-                    <!-- Notion Status -->
-                    <div id="notionStatus" class="bg-white rounded-lg shadow-lg p-6">
+                    <!-- 여행 계획 저장 -->
+                    <div class="bg-white rounded-lg shadow-lg p-6">
                         <h3 class="text-lg font-semibold text-gray-800 mb-3">
-                            <i class="fas fa-database text-purple-500"></i> Notion 저장 상태
+                            <i class="fas fa-save text-green-500"></i> 여행 계획 저장
                         </h3>
-                        <div id="notionResult" class="flex items-center space-x-3">
-                            <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-500"></div>
-                            <span class="text-gray-600">Notion에 저장 중...</span>
+                        <div class="space-y-3">
+                            <button id="savePlanBtn" class="w-full bg-green-500 text-white py-2 rounded hover:bg-green-600">
+                                <i class="fas fa-bookmark mr-2"></i>내 여행 계획에 저장
+                            </button>
+                            <button id="saveNotionBtn" class="w-full bg-purple-500 text-white py-2 rounded hover:bg-purple-600">
+                                <i class="fas fa-database mr-2"></i>Notion에 저장
+                            </button>
                         </div>
+                        <div id="saveResult" class="mt-3 hidden"></div>
+                    </div>
+                    
+                    <!-- 예산 계산기 -->
+                    <div class="bg-white rounded-lg shadow-lg p-6">
+                        <h3 class="text-lg font-semibold text-gray-800 mb-3">
+                            <i class="fas fa-calculator text-orange-500"></i> 예산 계산
+                        </h3>
+                        <div class="space-y-2">
+                            <select id="budgetStyle" class="w-full p-2 border rounded">
+                                <option value="budget">절약형</option>
+                                <option value="moderate" selected>보통</option>
+                                <option value="luxury">럭셔리</option>
+                            </select>
+                            <button id="calculateBudgetBtn" class="w-full bg-orange-500 text-white py-2 rounded hover:bg-orange-600">
+                                예산 계산하기
+                            </button>
+                        </div>
+                        <div id="budgetResult" class="mt-3 hidden"></div>
                     </div>
                 </div>
             </div>
@@ -291,6 +328,9 @@
         
         document.addEventListener('DOMContentLoaded', function() {
             console.log('DOM ready');
+            
+            // 사용자 인증 상태 확인
+            checkAuthStatus();
             
             // 오늘 날짜 설정
             const today = new Date().toISOString().split('T')[0];
@@ -792,6 +832,163 @@
                     infoWindow.open(map, marker);
                 });
             });
+        }
+        
+        // 사용자 인증 관련 함수
+        let currentTravelPlan = null;
+        
+        function checkAuthStatus() {
+            const token = localStorage.getItem('access_token');
+            if (token) {
+                // 로그인 상태
+                document.getElementById('authButtons').classList.add('hidden');
+                document.getElementById('userInfo').classList.remove('hidden');
+                document.getElementById('userName').textContent = '사용자';
+                
+                // 로그아웃 이벤트
+                document.getElementById('logoutBtn').onclick = function() {
+                    localStorage.removeItem('access_token');
+                    location.reload();
+                };
+            }
+        }
+        
+        // 여행 계획 저장 기능
+        function setupSaveFeatures() {
+            // 내 여행 계획에 저장
+            document.getElementById('savePlanBtn').onclick = async function() {
+                if (!currentTravelPlan) {
+                    alert('저장할 여행 계획이 없습니다.');
+                    return;
+                }
+                
+                const token = localStorage.getItem('access_token');
+                if (!token) {
+                    alert('로그인이 필요합니다.');
+                    window.location.href = 'login.html';
+                    return;
+                }
+                
+                try {
+                    const response = await fetch('/api/users/travel-plans', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({
+                            title: currentTravelPlan.title,
+                            city: currentTravelPlan.preferences?.city || 'Seoul',
+                            itinerary_json: JSON.stringify(currentTravelPlan.itinerary),
+                            total_cost: currentTravelPlan.total_cost?.amount || 0
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        showSaveResult('내 여행 계획에 저장되었습니다!', 'success');
+                    } else {
+                        showSaveResult('저장에 실패했습니다.', 'error');
+                    }
+                } catch (error) {
+                    showSaveResult('오류: ' + error.message, 'error');
+                }
+            };
+            
+            // Notion에 저장
+            document.getElementById('saveNotionBtn').onclick = async function() {
+                if (!currentTravelPlan) {
+                    alert('저장할 여행 계획이 없습니다.');
+                    return;
+                }
+                
+                try {
+                    const response = await fetch('/api/travel/save-notion', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(currentTravelPlan)
+                    });
+                    
+                    const result = await response.json();
+                    if (result.success) {
+                        showSaveResult(`Notion에 저장되었습니다! <a href="${result.url}" target="_blank" class="text-blue-500 hover:underline">보기</a>`, 'success');
+                    } else {
+                        showSaveResult('Notion 저장에 실패했습니다.', 'error');
+                    }
+                } catch (error) {
+                    showSaveResult('오류: ' + error.message, 'error');
+                }
+            };
+            
+            // 예산 계산
+            document.getElementById('calculateBudgetBtn').onclick = async function() {
+                if (!currentTravelPlan || !currentTravelPlan.itinerary) {
+                    alert('계산할 여행 계획이 없습니다.');
+                    return;
+                }
+                
+                const budgetStyle = document.getElementById('budgetStyle').value;
+                
+                try {
+                    const response = await fetch('/api/users/calculate-budget', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            itinerary: currentTravelPlan.itinerary,
+                            travel_style: budgetStyle
+                        })
+                    });
+                    
+                    const budget = await response.json();
+                    showBudgetResult(budget);
+                } catch (error) {
+                    alert('예산 계산 오류: ' + error.message);
+                }
+            };
+        }
+        
+        function showSaveResult(message, type) {
+            const saveResult = document.getElementById('saveResult');
+            saveResult.className = `mt-3 p-2 rounded ${type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`;
+            saveResult.innerHTML = message;
+            saveResult.classList.remove('hidden');
+        }
+        
+        function showBudgetResult(budget) {
+            const budgetResult = document.getElementById('budgetResult');
+            budgetResult.innerHTML = `
+                <div class="p-3 bg-orange-50 rounded">
+                    <h4 class="font-semibold text-orange-800 mb-2">예상 비용: ${budget.total_cost.toLocaleString()}원</h4>
+                    <div class="text-sm text-orange-700 space-y-1">
+                        <div>교통비: ${budget.breakdown.transportation.toLocaleString()}원</div>
+                        <div>음식비: ${budget.breakdown.food.toLocaleString()}원</div>
+                        <div>관광비: ${budget.breakdown.attractions.toLocaleString()}원</div>
+                        <div>숙박비: ${budget.breakdown.accommodation.toLocaleString()}원</div>
+                        <div>기타: ${budget.breakdown.miscellaneous.toLocaleString()}원</div>
+                    </div>
+                    ${budget.recommendations ? `
+                        <div class="mt-2 text-xs text-orange-600">
+                            ${budget.recommendations.slice(0, 3).map(rec => `<div>• ${rec}</div>`).join('')}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+            budgetResult.classList.remove('hidden');
+        }
+        
+        // 결과 표시 시 저장 기능 활성화
+        function displayResults(data) {
+            currentTravelPlan = data;
+            setupSaveFeatures();
+            
+            // 기존 displayResults 코드...
+            document.getElementById('results').classList.remove('hidden');
+            
+            // 날씨 정보 표시
+            if (data.weather_info) {
+                displayWeatherInfo(data.weather_info);
+            }
+            
+            // 나머지 코드는 기존과 동일...
         }
     </script>
 </body>

@@ -26,6 +26,7 @@ from app.services.place_quality_service import PlaceQualityService
 from app.services.weather_recommendation_service import WeatherRecommendationService
 from app.services.city_service import CityService
 from app.services.district_service import DistrictService
+from app.services.enhanced_place_discovery_service import EnhancedPlaceDiscoveryService
 
 class OpenAIService:
     def __init__(self):
@@ -37,14 +38,33 @@ class OpenAIService:
             self.client = AsyncOpenAI(api_key=api_key)
     
     async def generate_detailed_itinerary(self, prompt: str, trip_details: Dict[str, Any] = None) -> Dict[str, Any]:
-        """상세한 30분 단위 여행 일정 생성 (실제 API 연동)"""
+        """상세한 30분 단위 여행 일정 생성 (실제 장소 데이터 기반)"""
         
         if not self.client:
             return self._generate_mock_itinerary(prompt, trip_details)
         
-        # 날씨 정보 조회
-        weather_service = WeatherService()
+        # 8단계 아키텍처 구현
         city = trip_details.get('city', 'Seoul') if trip_details else 'Seoul'
+        
+        # 여행 날짜 추출
+        travel_dates = []
+        if trip_details:
+            start_date = trip_details.get('start_date')
+            end_date = trip_details.get('end_date')
+            if start_date:
+                travel_dates.append(start_date)
+            if end_date and end_date != start_date:
+                travel_dates.append(end_date)
+        
+        if not travel_dates:
+            travel_dates = ['2025-01-01']  # 기본값
+        
+        # 8단계 향상된 장소 발견 서비스 사용
+        enhanced_discovery = EnhancedPlaceDiscoveryService()
+        discovered_data = await enhanced_discovery.discover_places_with_weather(prompt, city, travel_dates)
+        
+        # 2. 날씨 정보 조회
+        weather_service = WeatherService()
         city_service = CityService()
         weather_code = city_service.get_weather_code(city)
         weather_data = await weather_service.get_current_weather(weather_code)
@@ -69,7 +89,8 @@ class OpenAIService:
             city, travel_style, duration_hours, start_location_coords
         )
         
-        location_context = await self._get_location_context(prompt, city_info, district_itinerary)
+        # 8단계 처리 결과를 기반으로 컨텍스트 생성
+        location_context = self._build_enhanced_context(discovered_data)
         style_context = self._get_style_specific_context(travel_style)
         
         system_prompt = f"""
@@ -92,8 +113,10 @@ class OpenAIService:
 **여행 스타일 특화:**
 {style_context}
 
-**검증된 지역 장소:**
+**8단계 처리된 장소 데이터:**
 {location_context}
+
+**절대 규칙: 위 검증된 장소들만 사용하세요. 가상의 장소 절대 금지!**
 
 **응답 규칙:**
 - 각 장소는 고유해야 함 (중복 절대 금지)
@@ -711,3 +734,33 @@ class OpenAIService:
                         }
         
         return None
+    def _build_real_places_context(self, discovered_data: Dict[str, Any]) -> str:
+        """발견된 실제 장소 데이터를 AI 프롬프트용 컨텍스트로 변환"""
+        places = discovered_data.get('filtered_places', [])
+        keywords = discovered_data.get('extracted_keywords', [])
+        
+        if not places:
+            return "검색된 장소가 없습니다. 일반적인 관광지를 추천해주세요."
+        
+        context = f"검색 키워드: {', '.join(keywords)}\n"
+        context += f"총 {len(places)}개의 검증된 장소 발견:\n\n"
+        
+        for i, place in enumerate(places, 1):
+            name = place.get('name', '')
+            address = place.get('address', '')
+            category = place.get('category', '')
+            rating = place.get('google_info', {}).get('rating', 0)
+            
+            context += f"{i}. {name}\n"
+            context += f"   - 주소: {address}\n"
+            context += f"   - 카테고리: {category}\n"
+            context += f"   - 평점: {rating}/5\n"
+            
+            # 블로그 후기 요약
+            blog_contents = place.get('blog_contents', [])
+            if blog_contents:
+                context += f"   - 후기: {blog_contents[0].get('summary', '')[:50]}...\n"
+            
+            context += "\n"
+        
+        return context
