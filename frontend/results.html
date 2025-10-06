@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🇰🇷 여행 계획 결과</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCVse3Cxbje1YzMp_SB6dkMvaWfCpMQ3Mk&libraries=places,geometry"></script>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-gray-800 mb-2">🗓️ 여행 계획 결과</h1>
+            <p class="text-gray-600">AI가 생성한 맞춤형 여행 일정</p>
+            <button onclick="window.history.back()" class="mt-4 px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">
+                <i class="fas fa-arrow-left mr-2"></i>돌아가기
+            </button>
+        </div>
+
+        <!-- 일자별 탭 -->
+        <div id="dayTabs" class="flex flex-wrap justify-center mb-8 space-x-2"></div>
+
+        <!-- 일정 내용 -->
+        <div class="max-w-7xl mx-auto">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Left Column: 일자별 일정 -->
+                <div class="space-y-6">
+                    <div class="bg-white rounded-lg shadow-lg p-6">
+                        <h2 class="text-2xl font-bold text-gray-800 mb-4">
+                            <i class="fas fa-calendar-day text-blue-500"></i> 
+                            <span id="currentDayTitle">1일차 일정</span>
+                        </h2>
+                        <div id="dailyTimeline" class="space-y-4"></div>
+                    </div>
+
+                    <!-- 장소 상세정보 -->
+                    <div class="bg-white rounded-lg shadow-lg p-6">
+                        <h3 class="text-lg font-semibold text-gray-800 mb-4">
+                            <i class="fas fa-info-circle text-green-500"></i> 장소 상세정보
+                        </h3>
+                        <div id="placeDetails" class="space-y-4"></div>
+                    </div>
+                </div>
+
+                <!-- Right Column: 지도 & 상태 -->
+                <div class="space-y-6">
+                    <!-- 지도 -->
+                    <div class="bg-white rounded-lg shadow-lg p-6">
+                        <h3 class="text-lg font-semibold text-gray-800 mb-4">
+                            <i class="fas fa-map text-red-500"></i> 일자별 동선
+                        </h3>
+                        <div id="map" class="w-full h-96 rounded-lg"></div>
+                    </div>
+
+                    <!-- Notion 저장 -->
+                    <div class="bg-white rounded-lg shadow-lg p-6">
+                        <h3 class="text-lg font-semibold text-gray-800 mb-3">
+                            <i class="fas fa-database text-purple-500"></i> Notion 저장
+                        </h3>
+                        <div id="notionSection">
+                            <p class="text-gray-600 mb-4">여행 계획을 Notion에 저장하시겠습니까?</p>
+                            <div class="flex space-x-3">
+                                <button id="saveToNotion" class="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600">
+                                    <i class="fas fa-save mr-2"></i>Notion에 저장
+                                </button>
+                                <button id="skipNotion" class="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400">
+                                    건너뛰기
+                                </button>
+                            </div>
+                        </div>
+                        <div id="notionResult" class="hidden"></div>
+                    </div>
+
+                    <!-- 여행 요약 -->
+                    <div class="bg-white rounded-lg shadow-lg p-6">
+                        <h3 class="text-lg font-semibold text-gray-800 mb-3">
+                            <i class="fas fa-chart-bar text-orange-500"></i> 여행 요약
+                        </h3>
+                        <div id="travelSummary" class="space-y-2"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let travelData = null;
+        let map = null;
+        let currentDay = 1;
+
+        // URL에서 데이터 가져오기
+        document.addEventListener('DOMContentLoaded', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const dataParam = urlParams.get('data');
+            
+            if (dataParam) {
+                try {
+                    travelData = JSON.parse(decodeURIComponent(dataParam));
+                    displayTravelPlan(travelData);
+                } catch (error) {
+                    console.error('데이터 파싱 오류:', error);
+                    alert('여행 계획 데이터를 불러올 수 없습니다.');
+                }
+            } else {
+                alert('여행 계획 데이터가 없습니다.');
+                window.history.back();
+            }
+
+            // Google Maps 초기화
+            if (typeof google !== 'undefined') {
+                initMap();
+            }
+        });
+
+        function displayTravelPlan(data) {
+            // 일자별 데이터 그룹화
+            const dayGroups = groupByDay(data.itinerary);
+            
+            // 탭 생성
+            createDayTabs(dayGroups);
+            
+            // 첫 번째 날 표시
+            displayDay(1, dayGroups);
+            
+            // 여행 요약 표시
+            displayTravelSummary(data, dayGroups);
+            
+            // Notion 저장 이벤트
+            setupNotionEvents(data);
+        }
+
+        function groupByDay(itinerary) {
+            const groups = {};
+            
+            // day 필드가 없는 경우 시간 기준으로 일자 할당
+            let currentDay = 1;
+            let lastTime = null;
+            
+            itinerary.forEach((item, index) => {
+                let day = item.day;
+                
+                // day 필드가 없는 경우 시간 기준으로 판단
+                if (!day) {
+                    const itemTime = item.time || '09:00';
+                    const timeHour = parseInt(itemTime.split(':')[0]);
+                    
+                    // 시간이 이전보다 작아지면 다음 날로 간주
+                    if (lastTime && timeHour < lastTime) {
+                        currentDay++;
+                    }
+                    
+                    day = currentDay;
+                    lastTime = timeHour;
+                }
+                
+                if (!groups[day]) {
+                    groups[day] = [];
+                }
+                groups[day].push({...item, day: day});
+            });
+            
+            console.log('Grouped by day:', groups);
+            return groups;
+        }
+
+        function createDayTabs(dayGroups) {
+            const tabsContainer = document.getElementById('dayTabs');
+            tabsContainer.innerHTML = '';
+            
+            Object.keys(dayGroups).forEach(day => {
+                const tab = document.createElement('button');
+                tab.className = `px-4 py-2 rounded-lg font-medium transition-colors ${
+                    day == currentDay ? 'bg-blue-500 text-white' : 'bg-white text-gray-700 hover:bg-blue-100'
+                }`;
+                tab.textContent = `${day}일차`;
+                tab.onclick = () => {
+                    currentDay = parseInt(day);
+                    displayDay(currentDay, dayGroups);
+                    updateTabStyles();
+                };
+                tabsContainer.appendChild(tab);
+            });
+        }
+
+        function updateTabStyles() {
+            const tabs = document.querySelectorAll('#dayTabs button');
+            tabs.forEach((tab, index) => {
+                if (index + 1 === currentDay) {
+                    tab.className = 'px-4 py-2 rounded-lg font-medium bg-blue-500 text-white';
+                } else {
+                    tab.className = 'px-4 py-2 rounded-lg font-medium bg-white text-gray-700 hover:bg-blue-100';
+                }
+            });
+        }
+
+        function displayDay(day, dayGroups) {
+            const dayData = dayGroups[day] || [];
+            
+            // 제목 업데이트
+            document.getElementById('currentDayTitle').textContent = `${day}일차 일정`;
+            
+            // 타임라인 표시
+            displayDailyTimeline(dayData);
+            
+            // 장소 상세정보 표시
+            displayPlaceDetails(dayData);
+            
+            // 지도 업데이트
+            updateMapForDay(dayData);
+            
+            // 탭 스타일 업데이트
+            updateTabStyles();
+        }
+
+        function displayDailyTimeline(dayData) {
+            const timeline = document.getElementById('dailyTimeline');
+            timeline.innerHTML = '';
+            
+            dayData.forEach((item, index) => {
+                const div = document.createElement('div');
+                div.className = 'p-4 bg-gray-50 rounded-lg mb-4 hover:bg-gray-100 transition-colors cursor-pointer';
+                div.onclick = () => showPlaceModal(item);
+                
+                div.innerHTML = `
+                    <div class="flex items-center space-x-2 mb-2">
+                        <span class="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm">${index + 1}</span>
+                        <span class="font-semibold text-blue-600">${item.time || '시간 미정'}</span>
+                        <span class="text-sm text-gray-500">• ${item.duration || '30분'}</span>
+                    </div>
+                    <h4 class="font-medium text-gray-800 mb-1">${item.place_name || item.name || item.activity}</h4>
+                    <p class="text-sm text-gray-600 mb-2">${item.description || ''}</p>
+                    <div class="text-xs text-gray-500">
+                        <span><i class="fas fa-map-marker-alt"></i> ${item.address || item.location || ''}</span>
+                        ${item.price ? `<span class="ml-4"><i class="fas fa-won-sign"></i> ${item.price}</span>` : ''}
+                        ${item.rating ? `<span class="ml-4"><i class="fas fa-star text-yellow-400"></i> ${item.rating}</span>` : ''}
+                    </div>
+                `;
+                timeline.appendChild(div);
+            });
+        }
+
+        function displayPlaceDetails(dayData) {
+            const placeDetails = document.getElementById('placeDetails');
+            placeDetails.innerHTML = '';
+            
+            dayData.forEach(item => {
+                const placeDiv = document.createElement('div');
+                placeDiv.className = 'border rounded-lg p-4 hover:shadow-md transition-shadow';
+                placeDiv.innerHTML = `
+                    <h4 class="font-semibold text-gray-800 mb-2">${item.place_name || item.name}</h4>
+                    <p class="text-sm text-gray-600 mb-2">${item.description || ''}</p>
+                    <div class="flex items-center space-x-4 text-xs text-gray-500 mb-2">
+                        <span><i class="fas fa-star text-yellow-400"></i> ${item.rating || 'N/A'}/5</span>
+                        <span><i class="fas fa-clock"></i> ${item.duration || '30분'}</span>
+                        ${item.phone ? `<span><i class="fas fa-phone"></i> ${item.phone}</span>` : ''}
+                    </div>
+                    ${item.blog_reviews && item.blog_reviews.length > 0 ? `
+                        <div class="mt-3">
+                            <p class="text-xs font-medium text-gray-700 mb-1">네이버 블로그 후기:</p>
+                            <div class="space-y-1">
+                                ${item.blog_reviews.slice(0, 3).map(blog => `
+                                    <a href="${blog.link || blog.url}" target="_blank" class="block text-xs text-blue-600 hover:underline">
+                                        <i class="fas fa-external-link-alt mr-1"></i>${blog.title}
+                                    </a>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+                    ${item.blog_contents && item.blog_contents.length > 0 ? `
+                        <div class="mt-3">
+                            <p class="text-xs font-medium text-gray-700 mb-1">블로그 내용 요약:</p>
+                            <div class="space-y-2">
+                                ${item.blog_contents.slice(0, 2).map(content => `
+                                    <div class="p-2 bg-yellow-50 rounded">
+                                        <p class="text-xs text-gray-600 mb-1">${content.summary || content.content || '내용을 불러오는 중...'}</p>
+                                        ${content.url ? `
+                                            <a href="${content.url}" target="_blank" class="text-xs text-blue-600 hover:underline">
+                                                <i class="fas fa-external-link-alt mr-1"></i>원본 블로그 보기
+                                            </a>
+                                        ` : ''}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+                `;
+                placeDetails.appendChild(placeDiv);
+            });
+        }
+
+        function initMap() {
+            map = new google.maps.Map(document.getElementById('map'), {
+                zoom: 13,
+                center: { lat: 37.5665, lng: 126.9780 }
+            });
+        }
+
+        function updateMapForDay(dayData) {
+            if (!map) return;
+            
+            // 기존 마커 제거
+            if (window.currentMarkers) {
+                window.currentMarkers.forEach(marker => marker.setMap(null));
+            }
+            window.currentMarkers = [];
+            
+            // 새 마커 추가
+            const bounds = new google.maps.LatLngBounds();
+            
+            dayData.forEach((item, index) => {
+                const marker = new google.maps.Marker({
+                    position: { lat: item.lat || 37.5665, lng: item.lng || 126.9780 },
+                    map: map,
+                    title: item.place_name || item.name,
+                    label: (index + 1).toString()
+                });
+                
+                const infoWindow = new google.maps.InfoWindow({
+                    content: `
+                        <div>
+                            <h4><strong>${item.place_name || item.name}</strong></h4>
+                            <p>${item.description || ''}</p>
+                            <p><i class="fas fa-clock"></i> ${item.time} (${item.duration})</p>
+                        </div>
+                    `
+                });
+                
+                marker.addListener('click', () => {
+                    infoWindow.open(map, marker);
+                });
+                
+                window.currentMarkers.push(marker);
+                bounds.extend(marker.getPosition());
+            });
+            
+            if (dayData.length > 0) {
+                map.fitBounds(bounds);
+            }
+        }
+
+        function displayTravelSummary(data, dayGroups) {
+            const summary = document.getElementById('travelSummary');
+            const totalDays = Object.keys(dayGroups).length;
+            const totalPlaces = data.itinerary.length;
+            
+            summary.innerHTML = `
+                <div class="flex justify-between">
+                    <span>총 여행 기간:</span>
+                    <span class="font-semibold">${totalDays}일</span>
+                </div>
+                <div class="flex justify-between">
+                    <span>총 방문 장소:</span>
+                    <span class="font-semibold">${totalPlaces}곳</span>
+                </div>
+                <div class="flex justify-between">
+                    <span>예상 총 비용:</span>
+                    <span class="font-semibold">${data.total_cost?.amount ? data.total_cost.amount.toLocaleString() + '원' : 'N/A'}</span>
+                </div>
+            `;
+        }
+
+        function setupNotionEvents(data) {
+            document.getElementById('saveToNotion').onclick = async () => {
+                document.getElementById('notionSection').innerHTML = `
+                    <div class="flex items-center space-x-3">
+                        <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-500"></div>
+                        <span class="text-gray-600">Notion에 저장 중...</span>
+                    </div>
+                `;
+                
+                try {
+                    const response = await fetch('/api/travel/save-notion', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(data)
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        document.getElementById('notionSection').innerHTML = `
+                            <div class="flex items-center space-x-3 text-green-700">
+                                <i class="fas fa-check-circle text-xl"></i>
+                                <span>Notion 저장 완료!</span>
+                                <a href="${result.url}" target="_blank" class="text-blue-500 hover:underline">
+                                    <i class="fas fa-external-link-alt"></i> 보기
+                                </a>
+                            </div>
+                        `;
+                    } else {
+                        throw new Error(result.error || 'Notion 저장 실패');
+                    }
+                } catch (error) {
+                    document.getElementById('notionSection').innerHTML = `
+                        <div class="flex items-center space-x-3 text-red-700">
+                            <i class="fas fa-exclamation-circle text-xl"></i>
+                            <span>Notion 저장 실패: ${error.message}</span>
+                        </div>
+                    `;
+                }
+            };
+            
+            document.getElementById('skipNotion').onclick = () => {
+                document.getElementById('notionSection').innerHTML = `
+                    <div class="text-gray-600">
+                        <i class="fas fa-info-circle"></i> Notion 저장을 건너뛰었습니다.
+                    </div>
+                `;
+            };
+        }
+
+        function showPlaceModal(place) {
+            // 모달 구현 (기존 코드와 동일)
+            alert(`${place.place_name || place.name}의 상세 정보를 표시합니다.`);
+        }
+    </script>
+</body>
+</html>

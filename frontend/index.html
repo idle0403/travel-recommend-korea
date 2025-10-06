@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🇰🇷 스마트 한국 여행 플래너</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCVse3Cxbje1YzMp_SB6dkMvaWfCpMQ3Mk&libraries=places,geometry"></script>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-gray-800 mb-2">🇰🇷 스마트 한국 여행 플래너</h1>
+            <p class="text-gray-600">AI가 추천하는 맞춤형 한국 여행 계획</p>
+        </div>
+
+        <!-- Main Form -->
+        <div class="max-w-4xl mx-auto bg-white rounded-lg shadow-lg p-6 mb-8">
+            <form id="travelForm" class="space-y-6">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            <i class="fas fa-map-marker-alt text-red-500"></i> 여행 도시
+                        </label>
+                        <select id="city" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <optgroup label="특별시">
+                                <option value="Seoul">서울특별시</option>
+                            </optgroup>
+                            <optgroup label="광역시">
+                                <option value="Busan">부산광역시</option>
+                                <option value="Daegu">대구광역시</option>
+                                <option value="Incheon">인천광역시</option>
+                                <option value="Gwangju">광주광역시</option>
+                                <option value="Daejeon">대전광역시</option>
+                                <option value="Ulsan">울산광역시</option>
+                            </optgroup>
+                            <optgroup label="특별자치도">
+                                <option value="Jeju">제주특별자치도</option>
+                            </optgroup>
+                            <optgroup label="경기도">
+                                <option value="Suwon">수원시</option>
+                                <option value="Yongin">용인시</option>
+                                <option value="Seongnam">성남시</option>
+                                <option value="Goyang">고양시</option>
+                            </optgroup>
+                            <optgroup label="강원도">
+                                <option value="Chuncheon">춘천시</option>
+                                <option value="Gangneung">강릉시</option>
+                                <option value="Sokcho">속초시</option>
+                            </optgroup>
+                            <optgroup label="충청북도">
+                                <option value="Cheongju">청주시</option>
+                                <option value="Chungju">충주시</option>
+                            </optgroup>
+                            <optgroup label="충청남도">
+                                <option value="Cheonan">천안시</option>
+                                <option value="Gongju">공주시</option>
+                                <option value="Buyeo">부여군</option>
+                            </optgroup>
+                            <optgroup label="전라북도">
+                                <option value="Jeonju">전주시</option>
+                                <option value="Gunsan">군산시</option>
+                            </optgroup>
+                            <optgroup label="전라남도">
+                                <option value="Mokpo">목포시</option>
+                                <option value="Yeosu">여수시</option>
+                                <option value="Suncheon">순천시</option>
+                            </optgroup>
+                            <optgroup label="경상북도">
+                                <option value="Pohang">포항시</option>
+                                <option value="Gyeongju">경주시</option>
+                                <option value="Andong">안동시</option>
+                            </optgroup>
+                            <optgroup label="경상남도">
+                                <option value="Changwon">창원시</option>
+                                <option value="Jinju">진주시</option>
+                                <option value="Tongyeong">통영시</option>
+                                <option value="Geoje">거제시</option>
+                            </optgroup>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            <i class="fas fa-heart text-pink-500"></i> 여행 스타일
+                        </label>
+                        <select id="travelStyle" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <option value="indoor_date">💕 실내 데이트</option>
+                            <option value="outdoor_date">🌳 실외 데이트</option>
+                            <option value="food_tour">🍽️ 맛집 투어</option>
+                            <option value="culture_tour">🏛️ 문화 탐방</option>
+                            <option value="shopping_tour">🛍️ 쇼핑 투어</option>
+                            <option value="healing_tour">🧘 힐링 여행</option>
+                            <option value="adventure_tour">🎢 액티비티</option>
+                            <option value="night_tour">🌃 야경 투어</option>
+                            <option value="family_tour">👨‍👩‍👧‍👦 가족 여행</option>
+                            <option value="custom">✨ 맞춤 설정</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- 여행 기간 설정 -->
+                <div id="customDateSection" class="space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                <i class="fas fa-calendar-plus text-green-500"></i> 여행 시작
+                            </label>
+                            <div class="grid grid-cols-2 gap-2">
+                                <input type="date" id="startDate" class="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                <input type="time" id="startTime" value="09:00" class="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                <i class="fas fa-calendar-minus text-red-500"></i> 여행 종료
+                            </label>
+                            <div class="grid grid-cols-2 gap-2">
+                                <input type="date" id="endDate" class="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                <input type="time" id="endTime" value="18:00" class="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 여행 기간 표시 -->
+                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <div class="flex items-center space-x-2">
+                            <i class="fas fa-info-circle text-blue-500"></i>
+                            <span class="text-sm font-medium text-blue-800">여행 기간:</span>
+                            <span id="tripDuration" class="text-sm text-blue-700">날짜를 선택해주세요</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        <i class="fas fa-home text-orange-500"></i> 출발지 (집 주소)</span>
+                    </label>
+                    <div class="relative">
+                        <input type="text" id="startLocation" placeholder="지도에서 출발지를 선택해주세요"
+                               class="w-full p-3 border border-gray-300 rounded-lg bg-gray-50 cursor-pointer focus:ring-2 focus:ring-blue-500" readonly>
+                        <button type="button" id="mapSearchBtn" class="absolute right-2 top-1/2 transform -translate-y-1/2 text-blue-500 hover:text-blue-700">
+                            <i class="fas fa-map-marker-alt"></i>
+                        </button>
+                    </div>
+
+                </div>
+
+                <!-- 지도 선택 모달 -->
+                <div id="mapModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-center justify-center">
+                    <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-96">
+                        <div class="p-4">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-lg font-bold text-gray-800">출발지 선택</h3>
+                                <button id="closeMapModal" class="text-gray-500 hover:text-gray-700">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                            <div class="mb-3">
+                                <input type="text" id="mapSearchInput" placeholder="주소나 장소명 검색"
+                                       class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500">
+                            </div>
+                            <div id="mapContainer" class="w-full h-80 rounded border"></div>
+                            <div class="mt-3 flex justify-end space-x-2">
+                                <button id="cancelMapSelection" class="px-4 py-2 text-gray-600 border rounded hover:bg-gray-50">취소</button>
+                                <button id="confirmMapSelection" class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">선택 완료</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        <i class="fas fa-comment text-green-500"></i> 여행 요청사항
+                    </label>
+                    <textarea id="prompt" rows="4" placeholder="예: 맛집 위주로 가족 여행 계획을 세워주세요"
+                              class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"></textarea>
+                </div>
+
+                <button type="submit" id="submitBtn"
+                        class="w-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white py-3 px-6 rounded-lg hover:from-blue-600 hover:to-indigo-700 transition duration-300">
+                    <i class="fas fa-magic mr-2"></i>
+                    <span id="btnText">AI 여행 계획 생성</span>
+                </button>
+            </form>
+        </div>
+
+        <!-- Loading -->
+        <div id="loading" class="hidden text-center py-8">
+            <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+            <p class="mt-4 text-gray-600">AI가 맞춤형 여행 계획을 생성하고 있습니다...</p>
+        </div>
+
+        <!-- Results -->
+        <div id="results" class="hidden max-w-7xl mx-auto">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Left Column: Timeline & Details -->
+                <div class="space-y-6">
+                    <!-- Timeline -->
+                    <div class="bg-white rounded-lg shadow-lg p-6">
+                        <h2 class="text-2xl font-bold text-gray-800 mb-4">
+                            <i class="fas fa-clock text-blue-500"></i> 시간별 일정
+                        </h2>
+                        <div id="timeline" class="space-y-4"></div>
+                    </div>
+
+                    <!-- Place Details -->
+                    <div class="bg-white rounded-lg shadow-lg p-6">
+                        <h3 class="text-lg font-semibold text-gray-800 mb-4">
+                            <i class="fas fa-info-circle text-green-500"></i> 장소 상세정보
+                        </h3>
+                        <div id="placeDetails" class="space-y-4"></div>
+                    </div>
+                </div>
+
+                <!-- Right Column: Map & Status -->
+                <div class="space-y-6">
+                    <!-- Map -->
+                    <div class="bg-white rounded-lg shadow-lg p-6">
+                        <h3 class="text-lg font-semibold text-gray-800 mb-4">
+                            <i class="fas fa-map text-red-500"></i> 최적 동선
+                        </h3>
+                        <div class="mb-3 flex space-x-4 text-xs">
+                            <div class="flex items-center">
+                                <div class="w-4 h-1 bg-blue-500 mr-1"></div>
+                                <span>🚇 대중교통</span>
+                            </div>
+                            <div class="flex items-center">
+                                <div class="w-4 h-1 bg-red-500 mr-1"></div>
+                                <span>🚗 자동차</span>
+                            </div>
+                            <div class="flex items-center">
+                                <div class="w-4 h-1 bg-green-500 mr-1"></div>
+                                <span>🚶 도보</span>
+                            </div>
+                        </div>
+                        <div id="map" class="w-full h-96 rounded-lg"></div>
+                    </div>
+
+                    <!-- Weather Info -->
+                    <div id="weatherInfo" class="bg-white rounded-lg shadow-lg p-6 hidden">
+                        <h3 class="text-lg font-semibold text-gray-800 mb-3">
+                            <i class="fas fa-cloud-sun text-blue-500"></i> 현재 날씨
+                        </h3>
+                        <div id="weatherContent" class="space-y-2"></div>
+                    </div>
+
+                    <!-- Notion Status -->
+                    <div id="notionStatus" class="bg-white rounded-lg shadow-lg p-6">
+                        <h3 class="text-lg font-semibold text-gray-800 mb-3">
+                            <i class="fas fa-database text-purple-500"></i> Notion 저장 상태
+                        </h3>
+                        <div id="notionResult" class="flex items-center space-x-3">
+                            <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-500"></div>
+                            <span class="text-gray-600">Notion에 저장 중...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Notifications -->
+        <div id="toast" class="fixed top-4 right-4 z-50 hidden">
+            <div class="bg-white border-l-4 border-green-500 rounded-lg shadow-lg p-4 max-w-sm">
+                <div class="flex items-center">
+                    <i id="toastIcon" class="fas fa-check-circle text-green-500 mr-3"></i>
+                    <span id="toastMessage" class="text-gray-800"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Place Modal -->
+        <div id="placeModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-center justify-center">
+            <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-96 overflow-y-auto">
+                <div class="p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 id="modalTitle" class="text-xl font-bold text-gray-800"></h3>
+                        <button id="closeModal" class="text-gray-500 hover:text-gray-700">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div id="modalContent" class="space-y-4"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        console.log('Main page script loaded');
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM ready');
+            
+            // 오늘 날짜 설정
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('startDate').value = today;
+            document.getElementById('endDate').value = today;
+            
+            // Google Maps 초기화
+            if (typeof google !== 'undefined') {
+                initMap();
+            }
+            
+            // 지도 모달 이벤트 등록
+            setupMapModalEvents();
+            
+            // 출발지 입력 필드 클릭 시 지도 모달 열기
+            const startLocationInput = document.getElementById('startLocation');
+            if (startLocationInput) {
+                startLocationInput.addEventListener('click', function() {
+                    document.getElementById('mapModal').classList.remove('hidden');
+                    setTimeout(() => {
+                        if (!mapModal) {
+                            initMapModal();
+                        }
+                    }, 100);
+                });
+            }
+            
+            // 폼 이벤트 등록
+            const form = document.getElementById('travelForm');
+            if (form) {
+                console.log('Form found');
+                form.onsubmit = async function(e) {
+                    e.preventDefault();
+                    console.log('Form submitted');
+                    
+                    const city = document.getElementById('city').value;
+                    const prompt = document.getElementById('prompt').value;
+                    const startLocation = document.getElementById('startLocation').value;
+                    
+                    if (!startLocation.trim()) {
+                        alert('출발지를 지도에서 선택해주세요');
+                        return;
+                    }
+                    
+                    if (!prompt.trim()) {
+                        alert('여행 요청사항을 입력해주세요');
+                        return;
+                    }
+                    
+                    // 로딩 표시
+                    document.getElementById('loading').classList.remove('hidden');
+                    document.getElementById('results').classList.add('hidden');
+                    document.getElementById('submitBtn').disabled = true;
+                    document.getElementById('btnText').textContent = '생성 중...';
+                    
+                    try {
+                        const startDate = document.getElementById('startDate').value;
+                        const endDate = document.getElementById('endDate').value;
+                        const startTime = document.getElementById('startTime').value;
+                        const endTime = document.getElementById('endTime').value;
+                        
+                        const response = await fetch('/api/travel/plan', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                prompt: prompt,
+                                preferences: {
+                                    city: city,
+                                    start_location: startLocation,
+                                    start_date: startDate,
+                                    end_date: endDate,
+                                    start_time: startTime,
+                                    end_time: endTime
+                                }
+                            })
+                        });
+                        
+                        const data = await response.json();
+                        console.log('API Response:', data);
+                        
+                        // 로딩 숨기기
+                        document.getElementById('loading').classList.add('hidden');
+                        document.getElementById('submitBtn').disabled = false;
+                        document.getElementById('btnText').textContent = 'AI 여행 계획 생성';
+                        
+                        // 결과 페이지로 이동
+                        const encodedData = encodeURIComponent(JSON.stringify(data));
+                        window.location.href = `/results.html?data=${encodedData}`;
+                        
+                    } catch (error) {
+                        console.error('Error:', error);
+                        alert('오류: ' + error.message);
+                        
+                        // 로딩 숨기기
+                        document.getElementById('loading').classList.add('hidden');
+                        document.getElementById('submitBtn').disabled = false;
+                        document.getElementById('btnText').textContent = 'AI 여행 계획 생성';
+                    }
+                };
+            }
+        });
+        
+        let map, directionsService, directionsRenderer;
+        let mapModal, mapSearchInput, autocomplete, selectedPlace;
+        
+        function initMap() {
+            map = new google.maps.Map(document.getElementById('map'), {
+                zoom: 13,
+                center: { lat: 37.5665, lng: 126.9780 }
+            });
+            directionsService = new google.maps.DirectionsService();
+            directionsRenderer = new google.maps.DirectionsRenderer();
+            directionsRenderer.setMap(map);
+            
+            // 출발지 입력 필드에 Autocomplete 추가
+            initPlacesAutocomplete();
+        }
+        
+        function initPlacesAutocomplete() {
+            // 자동완성 기능 비활성화 - 지도에서만 선택 가능
+        }
+        
+        function initMapModal() {
+            mapModal = new google.maps.Map(document.getElementById('mapContainer'), {
+                zoom: 13,
+                center: { lat: 37.5665, lng: 126.9780 }
+            });
+            
+            // 지도 검색 Autocomplete
+            mapSearchInput = document.getElementById('mapSearchInput');
+            const mapAutocomplete = new google.maps.places.Autocomplete(mapSearchInput, {
+                componentRestrictions: { country: 'kr' },
+                fields: ['place_id', 'geometry', 'name', 'formatted_address']
+            });
+            
+            let marker;
+            
+            mapAutocomplete.addListener('place_changed', () => {
+                const place = mapAutocomplete.getPlace();
+                if (place.geometry) {
+                    // 기존 마커 제거
+                    if (marker) marker.setMap(null);
+                    
+                    // 새 마커 추가
+                    marker = new google.maps.Marker({
+                        position: place.geometry.location,
+                        map: mapModal,
+                        title: place.name
+                    });
+                    
+                    // 지도 중심 이동
+                    mapModal.setCenter(place.geometry.location);
+                    mapModal.setZoom(15);
+                    
+                    // 선택된 장소 저장
+                    selectedPlace = {
+                        name: place.name,
+                        address: place.formatted_address,
+                        lat: place.geometry.location.lat(),
+                        lng: place.geometry.location.lng()
+                    };
+                }
+            });
+            
+            // 지도 클릭 이벤트
+            mapModal.addListener('click', (event) => {
+                // 기존 마커 제거
+                if (marker) marker.setMap(null);
+                
+                // 새 마커 추가
+                marker = new google.maps.Marker({
+                    position: event.latLng,
+                    map: mapModal,
+                    title: '선택된 위치'
+                });
+                
+                // 선택된 위치 저장
+                selectedPlace = {
+                    name: '선택된 위치',
+                    address: `위도: ${event.latLng.lat().toFixed(6)}, 경도: ${event.latLng.lng().toFixed(6)}`,
+                    lat: event.latLng.lat(),
+                    lng: event.latLng.lng()
+                };
+            });
+        }
+        
+        function displayResults(data) {
+            document.getElementById('results').classList.remove('hidden');
+            
+            // 날씨 정보 표시
+            if (data.weather_info) {
+                displayWeatherInfo(data.weather_info);
+            }
+            
+            // Google Maps 초기화
+            setTimeout(() => {
+                if (!map) {
+                    initMap();
+                }
+                // 경로 표시
+                if (data.itinerary && data.itinerary.length > 0) {
+                    displayRouteWithTransportation(data.itinerary);
+                }
+            }, 100);
+            
+            // 타임라인 표시
+            const timeline = document.getElementById('timeline');
+            timeline.innerHTML = '';
+            
+            if (data.itinerary) {
+                data.itinerary.forEach((item, index) => {
+                    const div = document.createElement('div');
+                    div.className = 'p-4 bg-gray-50 rounded-lg mb-4';
+                    div.innerHTML = `
+                        <div class="flex items-center space-x-2 mb-2">
+                            <span class="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm">${index + 1}</span>
+                            <span class="font-semibold text-blue-600">${item.time || '시간 미정'}</span>
+                            <span class="text-sm text-gray-500">• ${item.duration || '30분'}</span>
+                        </div>
+                        <h4 class="font-medium text-gray-800 mb-1">${item.name || item.activity || '활동'}</h4>
+                        <p class="text-sm text-gray-600 mb-2">${item.description || ''}</p>
+                        <div class="text-xs text-gray-500">
+                            <span><i class="fas fa-map-marker-alt"></i> ${item.location || item.address || ''}</span>
+                            ${item.price ? `<span class="ml-4"><i class="fas fa-won-sign"></i> ${item.price}</span>` : ''}
+                        </div>
+                    `;
+                    timeline.appendChild(div);
+                });
+            }
+            
+            // 장소 상세정보 표시
+            displayPlaceDetails(data.itinerary || []);
+            
+            // Notion 상태 표시
+            const notionResult = document.getElementById('notionResult');
+            if (data.notion_saved) {
+                notionResult.innerHTML = `
+                    <i class="fas fa-check-circle text-green-500 text-xl"></i>
+                    <span class="text-green-700">Notion 저장 완료!</span>
+                    ${data.notion_url ? `<a href="${data.notion_url}" target="_blank" class="text-blue-500 hover:underline ml-2">
+                        <i class="fas fa-external-link-alt"></i> 보기
+                    </a>` : ''}
+                `;
+            } else {
+                notionResult.innerHTML = `
+                    <i class="fas fa-exclamation-circle text-red-500 text-xl"></i>
+                    <span class="text-red-700">Notion 저장 실패</span>
+                `;
+            }
+        }
+        
+        function displayWeatherInfo(weatherInfo) {
+            const weatherDiv = document.getElementById('weatherInfo');
+            const weatherContent = document.getElementById('weatherContent');
+            
+            const weatherIcon = getWeatherIcon(weatherInfo.condition);
+            const tempColor = weatherInfo.temperature > 25 ? 'text-red-500' : 
+                             weatherInfo.temperature < 10 ? 'text-blue-500' : 'text-green-500';
+            
+            weatherContent.innerHTML = `
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center space-x-2">
+                        <span class="text-2xl">${weatherIcon}</span>
+                        <span class="text-lg font-medium">${weatherInfo.condition}</span>
+                    </div>
+                    <span class="text-2xl font-bold ${tempColor}">${weatherInfo.temperature}°C</span>
+                </div>
+                <div class="grid grid-cols-2 gap-2 text-sm text-gray-600">
+                    <div><i class="fas fa-thermometer-half"></i> 체감: ${weatherInfo.feels_like}°C</div>
+                    <div><i class="fas fa-tint"></i> 습도: ${weatherInfo.humidity}%</div>
+                    <div><i class="fas fa-wind"></i> 바람: ${weatherInfo.wind_speed}m/s</div>
+                    <div><i class="fas fa-eye"></i> 가시거리: ${weatherInfo.visibility}km</div>
+                </div>
+                ${weatherInfo.rain_probability > 0 ? `
+                    <div class="mt-3 p-2 bg-blue-50 rounded">
+                        <span class="text-sm text-blue-700">
+                            <i class="fas fa-umbrella"></i> 강수확률: ${weatherInfo.rain_probability}%
+                        </span>
+                    </div>
+                ` : ''}
+                <div class="mt-3 p-2 bg-green-50 rounded">
+                    <span class="text-sm text-green-700">
+                        <i class="fas fa-lightbulb"></i> ${weatherInfo.recommendation}
+                    </span>
+                </div>
+            `;
+            
+            weatherDiv.classList.remove('hidden');
+        }
+        
+        function getWeatherIcon(condition) {
+            const icons = {
+                '맑음': '☀️',
+                '구름조금': '🌤️', 
+                '구름많음': '☁️',
+                '흐림': '☁️',
+                '비': '🌧️',
+                '소나기': '🌦️',
+                '눈': '❄️',
+                '안개': '🌫️'
+            };
+            
+            for (const [key, icon] of Object.entries(icons)) {
+                if (condition.includes(key)) {
+                    return icon;
+                }
+            }
+            return '🌤️';
+        }
+        
+        function displayPlaceDetails(itinerary) {
+            const placeDetails = document.getElementById('placeDetails');
+            placeDetails.innerHTML = '';
+            
+            itinerary.forEach(item => {
+                const placeDiv = document.createElement('div');
+                placeDiv.className = 'border rounded-lg p-4 hover:shadow-md transition-shadow';
+                placeDiv.innerHTML = `
+                    <div class="flex items-start justify-between mb-2">
+                        <h4 class="font-semibold text-gray-800">${item.place_name || item.name || item.activity}</h4>
+                        <div class="flex space-x-2">
+                            <span class="px-2 py-1 text-xs rounded-full ${
+                                item.verified ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+                            }">
+                                ${item.verified ? '✓ 확인됨' : '⚠ 미확인'}
+                            </span>
+                            ${item.quality_score > 0 ? `
+                                <span class="px-2 py-1 text-xs rounded-full ${
+                                    item.quality_score >= 4.0 ? 'bg-blue-100 text-blue-800' :
+                                    item.quality_score >= 3.0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                                }">
+                                    품질: ${item.quality_score.toFixed(1)}/5.0
+                                </span>
+                            ` : ''}
+                        </div>
+                    </div>
+                    <p class="text-sm text-gray-600 mb-2">${item.description || ''}</p>
+                    <div class="flex items-center space-x-4 text-xs text-gray-500 mb-2">
+                        <span><i class="fas fa-star text-yellow-400"></i> ${item.rating || 'N/A'}/5</span>
+                        <span><i class="fas fa-users"></i> 리뷰 ${item.blog_reviews ? item.blog_reviews.length : 0}개</span>
+                        ${item.phone ? `<span><i class="fas fa-phone"></i> ${item.phone}</span>` : ''}
+                        <span><i class="fas fa-clock"></i> ${item.opening_hours ? item.opening_hours.join(', ') : '09:00-21:00'}</span>
+                    </div>
+                    ${item.blog_reviews && item.blog_reviews.length > 0 ? `
+                        <div class="mt-3">
+                            <p class="text-xs font-medium text-gray-700 mb-1">관련 리뷰:</p>
+                            <div class="space-y-1">
+                                ${item.blog_reviews.slice(0, 3).map(blog => `
+                                    <a href="${blog.link}" target="_blank" class="block text-xs text-blue-600 hover:underline">
+                                        <i class="fas fa-external-link-alt mr-1"></i>${blog.title}
+                                    </a>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+                    ${item.blog_contents && item.blog_contents.length > 0 ? `
+                        <div class="mt-3 space-y-2">
+                            ${item.blog_contents.map(content => `
+                                <div class="p-2 bg-yellow-50 rounded">
+                                    <p class="text-xs font-medium text-gray-700 mb-1">블로그 후기 내용:</p>
+                                    <p class="text-xs text-gray-600 mb-2">${content.summary || content.content || '후기 내용을 불러오는 중...'}</p>
+                                    ${content.keywords && content.keywords.length > 0 ? `
+                                        <div class="flex flex-wrap gap-1">
+                                            ${content.keywords.map(keyword => `
+                                                <span class="inline-block px-2 py-0.5 text-xs bg-blue-100 text-blue-800 rounded">${keyword}</span>
+                                            `).join('')}
+                                        </div>
+                                    ` : ''}
+                                    ${content.rating ? `
+                                        <div class="mt-1 text-xs text-gray-500">
+                                            <i class="fas fa-star text-yellow-400"></i> 블로그 평점: ${content.rating}/5
+                                        </div>
+                                    ` : ''}
+                                    ${content.url ? `
+                                        <div class="mt-1">
+                                            <a href="${content.url}" target="_blank" class="text-xs text-blue-600 hover:underline">
+                                                <i class="fas fa-external-link-alt mr-1"></i>원본 블로그 보기
+                                            </a>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : ''}
+                `;
+                placeDetails.appendChild(placeDiv);
+            });
+        }
+        
+        function setupMapModalEvents() {
+            // 지도 검색 버튼 클릭
+            document.getElementById('mapSearchBtn').addEventListener('click', () => {
+                document.getElementById('mapModal').classList.remove('hidden');
+                // 지도 모달 초기화
+                setTimeout(() => {
+                    if (!mapModal) {
+                        initMapModal();
+                    }
+                }, 100);
+            });
+            
+            // 모달 닫기
+            document.getElementById('closeMapModal').addEventListener('click', () => {
+                document.getElementById('mapModal').classList.add('hidden');
+            });
+            
+            // 취소 버튼
+            document.getElementById('cancelMapSelection').addEventListener('click', () => {
+                document.getElementById('mapModal').classList.add('hidden');
+            });
+            
+            // 선택 완료 버튼
+            document.getElementById('confirmMapSelection').addEventListener('click', () => {
+                if (selectedPlace) {
+                    document.getElementById('startLocation').value = selectedPlace.address;
+                    document.getElementById('mapModal').classList.add('hidden');
+                } else {
+                    alert('위치를 선택해주세요.');
+                }
+            });
+        }
+        
+        function displayRouteWithTransportation(itinerary) {
+            const startLocation = selectedPlace ? selectedPlace.address : document.getElementById('startLocation').value;
+            if (!startLocation.trim()) {
+                // 출발지가 없으면 일반 마커만 표시
+                displayMarkersOnly(itinerary);
+                return;
+            }
+            
+            // 출발지에서 첫 번째 장소로의 경로 표시
+            if (itinerary.length > 0) {
+                const destination = itinerary[0];
+                displayMultipleRoutes(startLocation, destination);
+            }
+            
+            // 모든 장소에 마커 표시
+            displayMarkersOnly(itinerary);
+        }
+        
+        function displayMultipleRoutes(start, destination) {
+            const modes = [
+                { mode: google.maps.TravelMode.TRANSIT, color: '#4285F4', name: '대중교통' },
+                { mode: google.maps.TravelMode.DRIVING, color: '#EA4335', name: '자동차' },
+                { mode: google.maps.TravelMode.WALKING, color: '#34A853', name: '도보' }
+            ];
+            
+            modes.forEach((transport, index) => {
+                const request = {
+                    origin: start,
+                    destination: `${destination.address || destination.location}`,
+                    travelMode: transport.mode
+                };
+                
+                directionsService.route(request, (result, status) => {
+                    if (status === 'OK') {
+                        const renderer = new google.maps.DirectionsRenderer({
+                            directions: result,
+                            routeIndex: 0,
+                            polylineOptions: {
+                                strokeColor: transport.color,
+                                strokeWeight: 4,
+                                strokeOpacity: 0.7
+                            },
+                            suppressMarkers: index > 0 // 첫 번째만 마커 표시
+                        });
+                        renderer.setMap(map);
+                        
+                        // 경로 정보 표시
+                        const route = result.routes[0];
+                        const leg = route.legs[0];
+                        console.log(`${transport.name}: ${leg.distance.text}, ${leg.duration.text}`);
+                    }
+                });
+            });
+        }
+        
+        function displayMarkersOnly(itinerary) {
+            itinerary.forEach((item, index) => {
+                const marker = new google.maps.Marker({
+                    position: { lat: item.lat || 37.5665, lng: item.lng || 126.9780 },
+                    map: map,
+                    title: item.place_name || item.name || item.activity,
+                    label: (index + 1).toString()
+                });
+                
+                const infoWindow = new google.maps.InfoWindow({
+                    content: `
+                        <div>
+                            <h4><strong>${item.place_name || item.name || item.activity}</strong></h4>
+                            <p>${item.description || ''}</p>
+                            <p><i class="fas fa-map-marker-alt"></i> ${item.address || item.location || ''}</p>
+                            ${item.rating ? `<p><i class="fas fa-star"></i> ${item.rating}/5</p>` : ''}
+                        </div>
+                    `
+                });
+                
+                marker.addListener('click', () => {
+                    infoWindow.open(map, marker);
+                });
+            });
+        }
+    </script>
+</body>
+</html>

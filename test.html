@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test</title>
+</head>
+<body>
+    <form id="travelForm">
+        <input type="text" id="prompt" value="테스트" required>
+        <button type="submit">테스트 버튼</button>
+    </form>
+
+    <script>
+        console.log('Script loaded');
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded');
+            
+            const form = document.getElementById('travelForm');
+            if (form) {
+                console.log('Form found');
+                form.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    console.log('Form submitted!');
+                    alert('작동함!');
+                });
+            }
+        });
+    </script>
+</body>
+</html>

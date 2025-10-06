@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🇰🇷 여행 플래너 테스트</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 p-8">
+    <div class="max-w-2xl mx-auto bg-white rounded-lg shadow-lg p-6">
+        <h1 class="text-2xl font-bold mb-6">🇰🇷 여행 플래너 테스트</h1>
+        
+        <form id="testForm" class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium mb-2">도시</label>
+                <select id="city" class="w-full p-3 border rounded">
+                    <option value="Seoul">서울</option>
+                    <option value="Busan">부산</option>
+                    <option value="Jeju">제주</option>
+                </select>
+            </div>
+            
+            <div>
+                <label class="block text-sm font-medium mb-2">여행 스타일</label>
+                <select id="travelStyle" class="w-full p-3 border rounded">
+                    <option value="food_tour">맛집 투어</option>
+                    <option value="culture_tour">문화 탐방</option>
+                    <option value="shopping_tour">쇼핑 투어</option>
+                </select>
+            </div>
+            
+            <div>
+                <label class="block text-sm font-medium mb-2">요청사항</label>
+                <textarea id="prompt" class="w-full p-3 border rounded" rows="3" placeholder="예: 서울 맛집 투어">서울 맛집 투어</textarea>
+            </div>
+            
+            <button type="submit" id="submitBtn" class="w-full bg-blue-500 text-white py-3 rounded hover:bg-blue-600">
+                여행 계획 생성
+            </button>
+        </form>
+        
+        <div id="loading" class="hidden text-center py-8">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
+            <p class="mt-4">AI가 여행 계획을 생성하고 있습니다...</p>
+        </div>
+        
+        <div id="results" class="hidden mt-8">
+            <h2 class="text-xl font-bold mb-4">생성된 여행 계획</h2>
+            <div id="itinerary" class="space-y-4"></div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('testForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const city = document.getElementById('city').value;
+            const travelStyle = document.getElementById('travelStyle').value;
+            const prompt = document.getElementById('prompt').value;
+            
+            // 로딩 표시
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('results').classList.add('hidden');
+            document.getElementById('submitBtn').disabled = true;
+            
+            try {
+                const response = await fetch('/api/travel/plan', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        preferences: {
+                            city: city,
+                            travel_style: travelStyle
+                        }
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                displayResults(data);
+                
+            } catch (error) {
+                alert('오류: ' + error.message);
+            } finally {
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('submitBtn').disabled = false;
+            }
+        });
+        
+        function displayResults(data) {
+            const resultsDiv = document.getElementById('results');
+            const itineraryDiv = document.getElementById('itinerary');
+            
+            itineraryDiv.innerHTML = '';
+            
+            if (data.itinerary && data.itinerary.length > 0) {
+                data.itinerary.forEach((item, index) => {
+                    const itemDiv = document.createElement('div');
+                    itemDiv.className = 'bg-gray-50 p-4 rounded';
+                    itemDiv.innerHTML = `
+                        <div class="flex items-center space-x-2 mb-2">
+                            <span class="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm">${index + 1}</span>
+                            <span class="font-semibold">${item.time || '시간 미정'}</span>
+                        </div>
+                        <h3 class="font-medium">${item.name || item.place_name || '장소명'}</h3>
+                        <p class="text-sm text-gray-600">${item.description || ''}</p>
+                        <p class="text-xs text-gray-500 mt-1">📍 ${item.location || item.address || ''}</p>
+                    `;
+                    itineraryDiv.appendChild(itemDiv);
+                });
+            } else {
+                itineraryDiv.innerHTML = '<p class="text-gray-500">일정이 생성되지 않았습니다.</p>';
+            }
+            
+            resultsDiv.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>

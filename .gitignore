@@ -1,0 +1,325 @@
+# =============================================================================
+# 한국 여행 플래너 - Git Ignore 설정
+# =============================================================================
+
+# 환경변수 및 비밀 정보 (가장 중요!)
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+*.env
+
+# API 키 및 인증 정보
+secrets/
+credentials/
+*.key
+*.pem
+*.p12
+*.pfx
+
+# =============================================================================
+# Python 관련
+# =============================================================================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Poetry
+poetry.lock  # 선택사항 - 협업시에는 포함하는 것이 좋음
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# Poetry virtual environments
+.venv
+venv/
+ENV/
+env/
+.env
+
+# =============================================================================
+# FastAPI / Uvicorn 관련
+# =============================================================================
+
+# Log files
+logs/
+*.log
+access.log
+error.log
+
+# =============================================================================
+# 데이터베이스 관련
+# =============================================================================
+
+# SQLite
+*.db
+*.sqlite
+*.sqlite3
+
+# PostgreSQL dumps
+*.sql
+*.dump
+*.backup
+
+# Database migration files (선택사항)
+# alembic/versions/*.py
+
+# =============================================================================
+# Docker 관련
+# =============================================================================
+
+# Docker volumes
+docker-volumes/
+.docker/
+
+# Docker Compose override files
+docker-compose.override.yml
+docker-compose.local.yml
+
+# =============================================================================
+# IDE 및 에디터 관련
+# =============================================================================
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+
+# =============================================================================
+# OS 관련
+# =============================================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+# =============================================================================
+# 프로젝트 특화 파일들
+# =============================================================================
+
+# 임시 파일들
+tmp/
+temp/
+.tmp/
+
+# 업로드된 파일들
+uploads/
+media/
+static/files/
+
+# 백업 파일들
+*.bak
+*.backup
+*.old
+
+# 압축 파일들
+*.zip
+*.tar.gz
+*.rar
+
+# 테스트 데이터
+test_data/
+mock_data/
+sample_data/
+
+# 문서 임시 파일
+*.docx#
+*.xlsx#
+*.pptx#
+
+# =============================================================================
+# Slack Bot 관련
+# =============================================================================
+
+# Slack 앱 credentials
+slack_credentials.json
+slack_config.json
+
+# =============================================================================
+# Notion 관련  
+# =============================================================================
+
+# Notion 토큰 및 설정
+notion_tokens.json
+notion_config.json
+
+# =============================================================================
+# 클라우드 서비스 관련
+# =============================================================================
+
+# AWS
+.aws/
+aws-credentials
+terraform.tfstate
+terraform.tfstate.backup
+*.tfvars
+
+# Google Cloud
+gcloud-credentials.json
+service-account.json
+
+# =============================================================================
+# 모니터링 및 로깅
+# =============================================================================
+
+# 로그 파일들
+*.log
+logs/
+log/
+application.log
+uvicorn.log
+gunicorn.log
+
+# 성능 프로파일링
+*.prof
+profile_results/
+
+# =============================================================================
+# 배포 관련
+# =============================================================================
+
+# 배포 스크립트의 환경 설정
+deploy.env
+production.env
+staging.env
+
+# Docker secrets
+docker-compose.secrets.yml
+
+# Kubernetes secrets
+k8s-secrets.yaml
+secrets.yaml
+
+# =============================================================================
+# 개발 임시 파일들
+# =============================================================================
+
+# 스크래치 파일들
+scratch/
+playground/
+experiments/
+
+# TODO 및 메모 파일들 (개인적인)
+TODO.md
+NOTES.md
+ideas.md
+
+# =============================================================================
+# 외부 도구들
+# =============================================================================
+
+# ngrok
+ngrok
+ngrok.exe
+
+# Node.js (프론트엔드가 있다면)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# =============================================================================
+# 보안 관련 (추가 예방책)
+# =============================================================================
+
+# 모든 토큰 형태의 파일들
+*token*
+*secret*
+*credential*
+*password*
+
+# API 키가 포함될 수 있는 설정 파일들
+config.json
+settings.json
+local_settings.py

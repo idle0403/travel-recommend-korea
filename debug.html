@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Test</title>
+</head>
+<body>
+    <form id="travelForm">
+        <input type="text" id="prompt" value="테스트" required>
+        <input type="date" id="startDate" required>
+        <input type="date" id="endDate" required>
+        <input type="time" id="startTime" value="09:00" required>
+        <input type="time" id="endTime" value="18:00" required>
+        <select id="city"><option value="Seoul">서울</option></select>
+        <select id="travelStyle"><option value="food_tour">맛집투어</option></select>
+        <button type="submit">테스트</button>
+    </form>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded');
+            
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('startDate').value = today;
+            document.getElementById('endDate').value = today;
+            
+            const form = document.getElementById('travelForm');
+            if (form) {
+                console.log('Form found');
+                form.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    console.log('Form submitted!');
+                    alert('폼 제출됨!');
+                });
+            } else {
+                console.error('Form not found');
+            }
+        });
+    </script>
+</body>
+</html>
