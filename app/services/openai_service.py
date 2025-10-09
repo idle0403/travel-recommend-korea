@@ -43,21 +43,25 @@ class OpenAIService:
         if not self.client:
             return self._generate_mock_itinerary(prompt, trip_details)
         
-        # 8단계 아키텍처 구현
+        # UI에서 전달된 설정값 추출
         city = trip_details.get('city', 'Seoul') if trip_details else 'Seoul'
+        travel_style = trip_details.get('travel_style', 'custom') if trip_details else 'custom'
+        start_date = trip_details.get('start_date') if trip_details else None
+        end_date = trip_details.get('end_date') if trip_details else None
+        start_time = trip_details.get('start_time', '09:00') if trip_details else '09:00'
+        end_time = trip_details.get('end_time', '18:00') if trip_details else '18:00'
+        start_location = trip_details.get('start_location', '') if trip_details else ''
         
-        # 여행 날짜 추출
+        # 여행 날짜 배열 생성
         travel_dates = []
-        if trip_details:
-            start_date = trip_details.get('start_date')
-            end_date = trip_details.get('end_date')
-            if start_date:
-                travel_dates.append(start_date)
-            if end_date and end_date != start_date:
-                travel_dates.append(end_date)
-        
+        if start_date:
+            travel_dates.append(start_date)
+        if end_date and end_date != start_date:
+            travel_dates.append(end_date)
         if not travel_dates:
             travel_dates = ['2025-01-01']  # 기본값
+        
+        print(f"📍 UI 설정 반영: {city}, {travel_style}, {start_time}~{end_time}")
         
         # 8단계 향상된 장소 발견 서비스 사용
         enhanced_discovery = EnhancedPlaceDiscoveryService()
@@ -75,15 +79,41 @@ class OpenAIService:
         district_service = DistrictService()
         city_info = city_service.get_city_info(city)
         
-        # 여행 스타일별 특화 프롬프트 생성
-        travel_style = trip_details.get('travel_style', 'custom') if trip_details else 'custom'
+        # UI에서 설정한 여행 스타일 사용 (이미 추출됨)
         
-        # 구역 기반 효율적 동선 구성
-        duration_hours = trip_details.get('duration_hours', 8) if trip_details else 8
+        # UI에서 설정한 여행 시간 계산
+        if start_time and end_time:
+            from datetime import datetime
+            start_dt = datetime.strptime(start_time, '%H:%M')
+            end_dt = datetime.strptime(end_time, '%H:%M')
+            duration_hours = (end_dt - start_dt).seconds // 3600
+            print(f"⏰ 여행 시간: {start_time}~{end_time} ({duration_hours}시간)")
+        else:
+            duration_hours = trip_details.get('duration_hours', 8) if trip_details else 8
+        
+        # 출발지 좌표 추출 (도시별 기본 좌표 사용)
         start_location_coords = None
-        if trip_details and trip_details.get('start_location'):
-            # 출발지 좌표 추출 (실제로는 geocoding 필요)
-            start_location_coords = {"lat": 37.5665, "lng": 126.9780}  # 기본값
+        if start_location:
+            # 도시별 기본 좌표 사용
+            city_coords = {
+                'Seoul': {"lat": 37.5665, "lng": 126.9780},
+                'Busan': {"lat": 35.1796, "lng": 129.0756},
+                'Daegu': {"lat": 35.8714, "lng": 128.6014},
+                'Incheon': {"lat": 37.4563, "lng": 126.7052},
+                'Gwangju': {"lat": 35.1595, "lng": 126.8526},
+                'Daejeon': {"lat": 36.3504, "lng": 127.3845},
+                'Ulsan': {"lat": 35.5384, "lng": 129.3114},
+                'Jeju': {"lat": 33.4996, "lng": 126.5312},
+                'Suwon': {"lat": 37.2636, "lng": 127.0286},
+                'Chuncheon': {"lat": 37.8813, "lng": 127.7298},
+                'Gangneung': {"lat": 37.7519, "lng": 128.8761},
+                'Jeonju': {"lat": 35.8242, "lng": 127.1480},
+                'Yeosu': {"lat": 34.7604, "lng": 127.6622},
+                'Gyeongju': {"lat": 35.8562, "lng": 129.2247},
+                'Andong': {"lat": 36.5684, "lng": 128.7294}
+            }
+            start_location_coords = city_coords.get(city, {"lat": 37.5665, "lng": 126.9780})
+            print(f"🏠 출발지 설정: {start_location} ({start_location_coords})")
         
         district_itinerary = district_service.create_district_based_itinerary(
             city, travel_style, duration_hours, start_location_coords
@@ -103,6 +133,10 @@ class OpenAIService:
 4. **중복 금지**: 같은 장소나 유사한 장소 중복 추천 절대 금지
 5. **불확실시 거부**: 확실하지 않으면 "해당 지역에 적합한 장소를 찾을 수 없습니다"라고 명시
 6. **지역 일치**: 요청 지역과 다른 지역 장소 추천 절대 금지
+7. **이동 거리 제한**: 연속된 장소 간 대중교통 이동시간이 20분을 초과하지 않도록 구성
+8. **도시 내 장소만**: {city} 시/도 내의 장소만 추천, 다른 도시 장소 절대 금지
+9. **지역 특화**: {city}의 실제 구/동 지역명을 사용하여 해당 지역 내 장소만 추천
+10. **도시 제한 강화**: {city} 이외의 다른 도시 장소는 절대 추천하지 말 것
 
 **날씨 기반 추천 우선순위:**
 - 날씨: {weather_data['condition']}
@@ -123,6 +157,9 @@ class OpenAIService:
 - 실제 존재하는 장소만 포함
 - 불확실한 경우 "verified": false로 표시
 - 날씨에 맞는 실내/실외 활동 우선 선택
+- **이동 거리 제한**: 연속된 장소 간 대중교통 이동시간 20분 이내로 제한
+- **도시 제한 강화**: {city} 내 장소만 추천 (예: 대구 요청시 대구광역시 내 장소만)
+- **지역 검증**: 모든 추천 장소가 {city}에 실제 위치하는지 재확인
 
 응답 형식:
 {{
@@ -199,21 +236,28 @@ class OpenAIService:
 **날씨 기반 실시간 추천:**
 {weather_recommendations}
 
-**여행 기간 정보:**
+**UI에서 설정한 여행 정보:**
+- 도시: {city}
+- 여행 스타일: {travel_style}
 - 시작일: {start_date or '오늘'}
 - 종료일: {end_date or '오늘'}
+- 매일 시작 시간: {start_time}
+- 매일 종료 시간: {end_time}
+- 출발지: {start_location or '미설정'}
 - 총 {days_count}일간 여행 (반드시 일자별로 구분해서 생성)
-- 매일 시작 시간: {trip_details.get('start_time', '09:00') if trip_details else '09:00'}
-- 매일 종료 시간: {trip_details.get('end_time', '18:00') if trip_details else '18:00'}
-- 도시: {trip_details.get('city', '서울') if trip_details else '서울'}
 
 **일정 생성 규칙:**
 1. **일자별 구분**: 각 날짜별로 독립적인 일정 구성 (반드시 day 필드 포함)
-2. **하루 6-10개 장소**: 매일 충분한 활동으로 구성
-3. **시간 순서**: 각 날짜마다 09:00부터 시작하여 순차적 시간 배치
-4. **실제 장소만**: 가상 장소 절대 금지, 검증된 장소만 추천
-5. **중복 방지**: 전체 기간 동안 같은 장소 중복 금지
-6. **현실적 동선**: 지역별 클러스터링으로 효율적 이동
+2. **시간 준수**: 매일 {start_time}부터 {end_time}까지 일정 구성
+3. **스타일 반영**: {travel_style} 스타일에 맞는 장소 우선 선택
+4. **도시 제한 강화**: {city} 내 장소만 추천 (다른 도시 절대 금지)
+5. **출발지 고려**: {start_location or '미설정'}에서 시작하는 동선 구성
+6. **실제 장소만**: 가상 장소 절대 금지, 검증된 장소만 추천
+7. **중복 방지**: 전체 기간 동안 같은 장소 중복 금지
+8. **현실적 동선**: 지역별 클러스터링으로 효율적 이동
+9. **이동시간 제한**: 연속된 장소 간 대중교통/도보 이동시간 20분 이내
+10. **지역 특화**: {city}의 유명한 구/동 지역 내에서만 장소 선택
+11. **지역 검증**: 모든 장소가 {city}에 실제 위치하는지 반드시 확인
 
 **응답 형식 (중요):**
 반드시 각 일정에 "day" 필드를 포함하여 {days_count}일간 일정을 생성하세요.
@@ -264,8 +308,8 @@ class OpenAIService:
                 ai_result = json.loads(content)
                 # 일자별 일정 구조화
                 structured_result = self._structure_daily_itinerary(ai_result, days_count)
-                # 실제 장소 검증 및 블로그 후기 추가
-                return await self._enhance_with_real_data(structured_result)
+                # 8단계 처리된 데이터로 결과 향상
+                return await self._enhance_with_8step_data(structured_result, discovered_data)
             except json.JSONDecodeError:
                 return self._generate_mock_itinerary(prompt, trip_details, days_count)
                 
@@ -384,103 +428,97 @@ class OpenAIService:
         """API 키가 없을 때 모의 일정 생성"""
         mock_schedule = []
         
+        # 도시별 모의 데이터
+        city = trip_details.get('city', 'Seoul') if trip_details else 'Seoul'
+        city_data = self._get_city_mock_data(city)
+        
         for day in range(1, days_count + 1):
-            # 하루에 8개 장소 생성
+            # 하루에 6개 장소 생성
             daily_places = [
                 {
                     "day": day,
                     "date": f"2025-01-{day:02d}",
                     "time": "09:00",
-                    "place_name": f"경복궁" if day == 1 else f"창덕궁" if day == 2 else f"N서울타워",
-                    "activity": "궁궐 관람" if day <= 2 else "전망대 관람",
-                    "address": "서울시 종로구 사직로 161" if day == 1 else "서울시 종로구 창덕궁길 99" if day == 2 else "서울시 중구 남산동 3가 105",
+                    "place_name": city_data['places'][0]['name'],
+                    "activity": city_data['places'][0]['activity'],
+                    "address": city_data['places'][0]['address'],
                     "duration": "90분",
-                    "description": "조선왕조의 정궁" if day == 1 else "아름다운 후원이 있는 궁궐" if day == 2 else "서울의 전경을 한눈에 볼 수 있는 전망대",
-                    "transportation": "지하철 3호선 경복궁역" if day == 1 else "지하철 3호선 안국역" if day == 2 else "지하철 4호선 명동역",
-                    "rating": 4.5 if day == 1 else 4.4 if day == 2 else 4.6,
-                    "price": "3,000원" if day <= 2 else "12,000원",
-                    "lat": 37.5796 if day == 1 else 37.5792 if day == 2 else 37.5512,
-                    "lng": 126.9770 if day == 1 else 126.9910 if day == 2 else 126.9882
+                    "description": city_data['places'][0]['description'],
+                    "transportation": city_data['places'][0]['transportation'],
+                    "rating": city_data['places'][0]['rating'],
+                    "price": city_data['places'][0]['price'],
+                    "lat": city_data['places'][0]['lat'],
+                    "lng": city_data['places'][0]['lng']
                 },
                 {
                     "day": day,
                     "date": f"2025-01-{day:02d}",
                     "time": "11:00",
-                    "place_name": f"명동 쇼핑거리" if day == 1 else f"홍대 걸고싶은거리" if day == 2 else f"강남 거리",
-                    "activity": "쇼핑 및 거리구경" if day == 1 else "쇼핑 및 카페" if day == 2 else "쇼핑 및 카페",
-                    "address": "서울시 중구 명동길" if day == 1 else "서울시 마포구 서교동" if day == 2 else "서울시 강남구 강남대로",
+                    "place_name": city_data['places'][1]['name'],
+                    "activity": city_data['places'][1]['activity'],
+                    "address": city_data['places'][1]['address'],
                     "duration": "120분",
-                    "description": "서울의 대표 쇼핑거리" if day == 1 else "젊음의 거리, 다양한 카페와 상점" if day == 2 else "트렌디한 쇼핑과 맛집이 모인 곳",
-                    "transportation": "지하철 4호선 명동역" if day == 1 else "지하철 2호선 홍대입구역" if day == 2 else "지하철 2호선 강남역",
-                    "rating": 4.2 if day == 1 else 4.1 if day == 2 else 4.2,
-                    "price": "무료",
-                    "lat": 37.5636 if day == 1 else 37.5563 if day == 2 else 37.4979,
-                    "lng": 126.9834 if day == 1 else 126.9236 if day == 2 else 127.0276
+                    "description": city_data['places'][1]['description'],
+                    "transportation": city_data['places'][1]['transportation'],
+                    "rating": city_data['places'][1]['rating'],
+                    "price": city_data['places'][1]['price'],
+                    "lat": city_data['places'][1]['lat'],
+                    "lng": city_data['places'][1]['lng']
                 },
                 {
                     "day": day,
                     "date": f"2025-01-{day:02d}",
                     "time": "13:00",
-                    "place_name": f"남대문 시장" if day == 1 else f"광장시장" if day == 2 else f"가로수길",
-                    "activity": "전통시장 탐방" if day <= 2 else "맛집 탐방",
-                    "address": "서울시 중구 남대문시장길" if day == 1 else "서울시 중구 청계천로 40" if day == 2 else "서울시 강남구 가로수길",
+                    "place_name": city_data['places'][2]['name'],
+                    "activity": city_data['places'][2]['activity'],
+                    "address": city_data['places'][2]['address'],
                     "duration": "90분",
-                    "description": "전통 시장에서 맛있는 음식 체험" if day <= 2 else "다양한 맛집이 모인 거리",
-                    "transportation": "지하철 4호선 회현역" if day == 1 else "지하철 2호선 을지로3가역" if day == 2 else "지하철 3호선 신사역",
-                    "rating": 4.3,
-                    "price": "10,000원" if day <= 2 else "15,000원",
-                    "lat": 37.5595 if day == 1 else 37.5658 if day == 2 else 37.5172,
-                    "lng": 126.9941 if day == 1 else 126.9895 if day == 2 else 127.0286
-                },
-                {
-                    "day": day,
-                    "date": f"2025-01-{day:02d}",
-                    "time": "15:00",
-                    "place_name": f"인사동 거리" if day == 1 else f"이태원" if day == 2 else f"코엑스몰",
-                    "activity": "거리 예술 감상" if day == 1 else "쇼핑 및 카페" if day == 2 else "쇼핑 및 영화관람",
-                    "address": "서울시 종로구 인사동길" if day == 1 else "서울시 마포구 이태원로 29" if day == 2 else "서울시 강남구 영동대로 513",
-                    "duration": "60분" if day == 1 else "90분" if day == 2 else "120분",
-                    "description": "예술과 문화가 어우러진 거리" if day == 1 else "다양한 쇼핑과 맛집" if day == 2 else "대형 쇼핑몰과 영화관",
-                    "transportation": "지하철 3호선 안국역" if day == 1 else "지하철 2호선 홍대입구역" if day == 2 else "지하철 2호선 삼성역",
-                    "rating": 4.4 if day == 1 else 4.2 if day == 2 else 4.3,
-                    "price": "무료" if day <= 2 else "5,000원",
-                    "lat": 37.5759 if day == 1 else 37.5563 if day == 2 else 37.5125,
-                    "lng": 126.9852 if day == 1 else 126.9236 if day == 2 else 127.1025
-                },
-                {
-                    "day": day,
-                    "date": f"2025-01-{day:02d}",
-                    "time": "16:30",
-                    "place_name": f"청계천" if day == 1 else f"한강공원 여의도" if day == 2 else f"선릉도공원",
-                    "activity": "도심 산책" if day == 1 else "산책 및 휴식" if day == 2 else "산책 및 전망",
-                    "address": "서울시 종로구 청계천로" if day == 1 else "서울시 영등포구 여의동로" if day == 2 else "서울시 동작구 상도동",
-                    "duration": "45분" if day == 1 else "90분" if day == 2 else "60분",
-                    "description": "도심 속 자연 하천" if day == 1 else "한강을 따라 산책할 수 있는 공원" if day == 2 else "서울의 전경을 볼 수 있는 공원",
-                    "transportation": "지하철 1호선 종각역" if day == 1 else "지하철 5호선 여의나루역" if day == 2 else "지하철 9호선 동작역",
-                    "rating": 4.1 if day == 1 else 4.3 if day == 2 else 4.5,
-                    "price": "무료",
-                    "lat": 37.5694 if day == 1 else 37.5285 if day == 2 else 37.5044,
-                    "lng": 126.9912 if day == 1 else 126.9335 if day == 2 else 126.9834
-                },
-                {
-                    "day": day,
-                    "date": f"2025-01-{day:02d}",
-                    "time": "17:30",
-                    "place_name": f"동대문 디자인플라자" if day == 1 else f"반포한강공원" if day == 2 else f"롯데월드타워",
-                    "activity": "디자인 및 문화 체험" if day == 1 else "산책 및 야경" if day == 2 else "쇼핑 및 전망대",
-                    "address": "서울시 중구 을지로 281" if day == 1 else "서울시 서초구 반포대로 21길 40" if day == 2 else "서울시 송파구 올림픽로 300",
-                    "duration": "90분",
-                    "description": "현대적 디자인과 문화 공간" if day == 1 else "한강을 따라 산책하며 야경 감상" if day == 2 else "대형 쇼핑몰과 전망대",
-                    "transportation": "지하철 2호선 동대문역사문화공원역" if day == 1 else "지하철 7호선 반포역" if day == 2 else "지하철 2호선 잠실역",
-                    "rating": 4.6 if day == 1 else 4.4 if day == 2 else 4.5,
-                    "price": "무료" if day <= 2 else "27,000원",
-                    "lat": 37.5664 if day == 1 else 37.5133 if day == 2 else 37.5125,
-                    "lng": 127.0092 if day == 1 else 127.0021 if day == 2 else 127.1025
+                    "description": city_data['places'][2]['description'],
+                    "transportation": city_data['places'][2]['transportation'],
+                    "rating": city_data['places'][2]['rating'],
+                    "price": city_data['places'][2]['price'],
+                    "lat": city_data['places'][2]['lat'],
+                    "lng": city_data['places'][2]['lng']
                 }
             ]
             mock_schedule.extend(daily_places)
         
         return {"schedule": mock_schedule}
+    
+    def _get_city_mock_data(self, city: str) -> Dict[str, Any]:
+        """도시별 모의 데이터 생성"""
+        city_mock_data = {
+            'Seoul': {
+                'places': [
+                    {'name': '경복궁', 'activity': '궁궐 관람', 'address': '서울시 종로구 사직로 161', 'description': '조선왕조의 정궁', 'transportation': '지하철 3호선 경복궁역', 'rating': 4.5, 'price': '3,000원', 'lat': 37.5796, 'lng': 126.9770},
+                    {'name': '명동 쇼핑거리', 'activity': '쇼핑 및 거리구경', 'address': '서울시 중구 명동길', 'description': '서울의 대표 쇼핑거리', 'transportation': '지하철 4호선 명동역', 'rating': 4.2, 'price': '무료', 'lat': 37.5636, 'lng': 126.9834},
+                    {'name': '남대문 시장', 'activity': '전통시장 탐방', 'address': '서울시 중구 남대문시장길', 'description': '전통 시장에서 맛있는 음식 체험', 'transportation': '지하철 4호선 회현역', 'rating': 4.3, 'price': '10,000원', 'lat': 37.5595, 'lng': 126.9941}
+                ]
+            },
+            'Daegu': {
+                'places': [
+                    {'name': '동성로', 'activity': '쇼핑 및 거리구경', 'address': '대구시 중구 동성로2가', 'description': '대구의 대표 번화가', 'transportation': '지하철 1호선 중앙로역', 'rating': 4.3, 'price': '무료', 'lat': 35.8714, 'lng': 128.6014},
+                    {'name': '서문시장', 'activity': '전통시장 탐방', 'address': '대구시 중구 큰장로26길 45', 'description': '대구 대표 전통시장', 'transportation': '지하철 3호선 서문시장역', 'rating': 4.2, 'price': '15,000원', 'lat': 35.8700, 'lng': 128.5900},
+                    {'name': '팔공산', 'activity': '자연 관광', 'address': '대구시 동구 팔공산로', 'description': '대구의 명산', 'transportation': '버스 101번', 'rating': 4.4, 'price': '무료', 'lat': 35.9500, 'lng': 128.7000}
+                ]
+            },
+            'Busan': {
+                'places': [
+                    {'name': '해운대해수욕장', 'activity': '해변 관광', 'address': '부산시 해운대구 우동', 'description': '부산의 대표 해수욕장', 'transportation': '지하철 2호선 해운대역', 'rating': 4.4, 'price': '무료', 'lat': 35.1631, 'lng': 129.1635},
+                    {'name': '자갈치시장', 'activity': '해산물 시장', 'address': '부산시 중구 자갈치해안로 52', 'description': '부산 대표 수산시장', 'transportation': '지하철 1호선 자갈치역', 'rating': 4.3, 'price': '20,000원', 'lat': 35.0966, 'lng': 129.0306},
+                    {'name': '감천문화마을', 'activity': '문화 관광', 'address': '부산시 사하구 감내2로 203', 'description': '부산의 마추픽추', 'transportation': '버스 2-2번', 'rating': 4.5, 'price': '무료', 'lat': 35.0975, 'lng': 129.0107}
+                ]
+            },
+            'Jeju': {
+                'places': [
+                    {'name': '성산일출봉', 'activity': '자연 관광', 'address': '제주시 성산읍 일출로 284-12', 'description': '제주의 대표 관광지', 'transportation': '버스 201번', 'rating': 4.6, 'price': '5,000원', 'lat': 33.4584, 'lng': 126.9427},
+                    {'name': '한라산', 'activity': '등산', 'address': '제주시 1100로', 'description': '제주도 최고봉', 'transportation': '버스 740번', 'rating': 4.5, 'price': '무료', 'lat': 33.3617, 'lng': 126.5292},
+                    {'name': '우도', 'activity': '섬 관광', 'address': '제주시 우도면', 'description': '아름다운 작은 섬', 'transportation': '배편', 'rating': 4.4, 'price': '8,000원', 'lat': 33.5009, 'lng': 126.9500}
+                ]
+            }
+        }
+        
+        return city_mock_data.get(city, city_mock_data['Seoul'])
     
     async def _get_location_context(self, prompt: str, city_info: Dict[str, Any], district_itinerary: List[Dict[str, Any]] = None) -> str:
         """도시별 특화 정보 및 실제 장소 정보 제공"""
@@ -734,33 +772,91 @@ class OpenAIService:
                         }
         
         return None
-    def _build_real_places_context(self, discovered_data: Dict[str, Any]) -> str:
-        """발견된 실제 장소 데이터를 AI 프롬프트용 컨텍스트로 변환"""
-        places = discovered_data.get('filtered_places', [])
-        keywords = discovered_data.get('extracted_keywords', [])
+    def _build_enhanced_context(self, discovered_data: Dict[str, Any]) -> str:
+        """8단계 처리된 데이터를 AI 컨텍스트로 변환"""
+        verified_places = discovered_data.get('verified_places', [])
+        weather_forecast = discovered_data.get('weather_forecast', {})
+        cache_usage = discovered_data.get('cache_usage', {})
         
-        if not places:
-            return "검색된 장소가 없습니다. 일반적인 관광지를 추천해주세요."
+        if not verified_places:
+            return "검증된 장소가 없습니다."
         
-        context = f"검색 키워드: {', '.join(keywords)}\n"
-        context += f"총 {len(places)}개의 검증된 장소 발견:\n\n"
+        context = f"8단계 처리 결과:\n"
+        context += f"- 검증된 장소: {len(verified_places)}개\n"
+        context += f"- 캐시 활용: {cache_usage.get('cached', 0)}개, 신규 크롤링: {cache_usage.get('new_crawl', 0)}개\n"
         
-        for i, place in enumerate(places, 1):
+        # 날씨 정보
+        if weather_forecast:
+            context += f"\n날씨 기반 필터링 적용됨:\n"
+            for date, weather in weather_forecast.items():
+                context += f"- {date}: {weather.get('condition', '')}, {weather.get('temperature', '')}°C\n"
+        
+        context += f"\n검증된 장소 목록:\n"
+        
+        for i, place in enumerate(verified_places[:15], 1):  # 최대 15개
             name = place.get('name', '')
             address = place.get('address', '')
-            category = place.get('category', '')
-            rating = place.get('google_info', {}).get('rating', 0)
+            verification_status = place.get('verification_status', 'unknown')
             
-            context += f"{i}. {name}\n"
+            context += f"{i}. {name} [검증: {verification_status}]\n"
             context += f"   - 주소: {address}\n"
-            context += f"   - 카테고리: {category}\n"
-            context += f"   - 평점: {rating}/5\n"
             
             # 블로그 후기 요약
             blog_contents = place.get('blog_contents', [])
             if blog_contents:
-                context += f"   - 후기: {blog_contents[0].get('summary', '')[:50]}...\n"
+                context += f"   - 후기: {blog_contents[0].get('summary', '')[:30]}...\n"
             
             context += "\n"
         
         return context
+    
+    async def _enhance_with_8step_data(self, ai_result: Dict[str, Any], discovered_data: Dict[str, Any]) -> Dict[str, Any]:
+        """8단계 처리된 데이터로 AI 결과 향상"""
+        enhanced_schedule = []
+        verified_places = discovered_data.get('verified_places', [])
+        
+        # AI가 생성한 일정과 8단계 검증된 장소 매칭
+        for item in ai_result.get('schedule', []):
+            place_name = item.get('place_name', '')
+            
+            # 검증된 장소에서 매칭되는 장소 찾기
+            matched_place = None
+            for verified_place in verified_places:
+                if place_name.lower() in verified_place.get('name', '').lower() or \
+                   verified_place.get('name', '').lower() in place_name.lower():
+                    matched_place = verified_place
+                    break
+            
+            if matched_place:
+                # 검증된 데이터로 아이템 향상
+                enhanced_item = {
+                    **item,
+                    'place_name': matched_place.get('name', place_name),
+                    'address': matched_place.get('address', item.get('address', '')),
+                    'verified': True,
+                    'verification_status': matched_place.get('verification_status', 'verified'),
+                    'blog_reviews': matched_place.get('blog_reviews', []),
+                    'blog_contents': matched_place.get('blog_contents', []),
+                    'google_info': matched_place.get('google_info', {}),
+                    'naver_info': matched_place.get('naver_info', {}),
+                    'lat': matched_place.get('lat', item.get('lat', 37.5665)),
+                    'lng': matched_place.get('lng', item.get('lng', 126.9780))
+                }
+                enhanced_schedule.append(enhanced_item)
+            else:
+                # 매칭되지 않은 경우 기본 아이템 유지 (검증 안됨 표시)
+                item['verified'] = False
+                item['verification_status'] = 'unverified'
+                enhanced_schedule.append(item)
+        
+        # 8단계 처리 메타데이터 추가
+        ai_result['schedule'] = enhanced_schedule
+        ai_result['processing_metadata'] = {
+            'total_verified_places': len(verified_places),
+            'matched_places': len([item for item in enhanced_schedule if item.get('verified')]),
+            'cache_usage': discovered_data.get('cache_usage', {}),
+            'weather_forecast': discovered_data.get('weather_forecast', {}),
+            'optimized_route': discovered_data.get('optimized_route', {})
+        }
+        
+        return ai_result

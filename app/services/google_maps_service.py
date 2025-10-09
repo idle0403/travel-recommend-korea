@@ -296,37 +296,50 @@ class GoogleMapsService:
         return {"results": results}
     
     def _mock_optimized_route(self, locations: List[Dict]) -> Dict[str, Any]:
-        """모의 최적 경로 결과"""
+        """모의 최적 경로 결과 - UI 지도 표시를 위한 강화"""
+        if not locations:
+            return {"error": "장소 정보가 없습니다"}
+            
+        # 실제 좌표 기반 polyline 생성
+        polyline_points = []
+        for location in locations:
+            lat = location.get('lat', 37.5665)
+            lng = location.get('lng', 126.9780)
+            polyline_points.append(f"{lat},{lng}")
+        
+        # 경계 계산
+        lats = [loc.get('lat', 37.5665) for loc in locations]
+        lngs = [loc.get('lng', 126.9780) for loc in locations]
+        
+        bounds = {
+            "northeast": {"lat": max(lats) + 0.01, "lng": max(lngs) + 0.01},
+            "southwest": {"lat": min(lats) - 0.01, "lng": min(lngs) - 0.01}
+        }
+        
         return {
-            "total_distance": "8.5km",
-            "total_duration": "45분",
-            "polyline": "sample_encoded_polyline_string",
-            "bounds": {
-                "northeast": {"lat": 37.5665, "lng": 126.9780},
-                "southwest": {"lat": 37.5565, "lng": 126.9680}
-            },
+            "total_distance": f"{len(locations) * 1.5:.1f}km",
+            "total_duration": f"{len(locations) * 8}분",
+            "polyline": "|".join(polyline_points),  # 실제 좌표 데이터
+            "bounds": bounds,
+            "locations": locations,  # 지도 표시를 위한 장소 데이터
             "route_segments": [
                 {
-                    "from": locations[0]["name"] if locations else "출발지",
-                    "to": locations[1]["name"] if len(locations) > 1 else "도착지",
-                    "distance": "2.1km",
-                    "duration": "12분",
+                    "from": locations[i].get("name", f"장소{i+1}") if i < len(locations) else "출발지",
+                    "to": locations[i + 1].get("name", f"장소{i+2}") if i + 1 < len(locations) else "도착지",
+                    "distance": "1.5km",
+                    "duration": "8분",
                     "steps": [
                         {
-                            "instruction": "지하철 2호선 이용",
-                            "distance": "2.1km",
-                            "duration": "12분",
-                            "travel_mode": "TRANSIT",
-                            "transit_line": "지하철 2호선",
-                            "departure_stop": "출발역",
-                            "arrival_stop": "도착역",
-                            "num_stops": 3
+                            "instruction": "지하철 또는 버스 이용",
+                            "distance": "1.5km",
+                            "duration": "8분",
+                            "travel_mode": "TRANSIT"
                         }
                     ]
-                }
+                } for i in range(len(locations) - 1)
             ],
-            "optimized_order": [],
-            "waypoint_order": []
+            "optimized_order": list(range(len(locations))),
+            "waypoint_order": list(range(len(locations)))
         }
     
     def _mock_directions_result(self, origin: str, destination: str) -> Dict[str, Any]:

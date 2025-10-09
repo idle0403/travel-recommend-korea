@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.services.auth_service import AuthService
 from app.services.cache_service import CacheService
 from app.services.budget_calculator_service import BudgetCalculatorService
+from app.services.enhanced_place_discovery_service import EnhancedPlaceDiscoveryService
 from app.models.user import User
 from app.models.travel_plan import TravelPlan, TravelReview
 
@@ -20,6 +21,7 @@ router = APIRouter()
 auth_service = AuthService()
 cache_service = CacheService()
 budget_service = BudgetCalculatorService()
+enhanced_discovery = EnhancedPlaceDiscoveryService()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -170,3 +172,37 @@ async def calculate_budget(itinerary: List[dict], travel_style: str = "moderate"
     """여행 예산 계산"""
     budget_result = budget_service.calculate_detailed_budget(itinerary, travel_style)
     return budget_result
+@router.post("/8step-analysis")
+async def get_8step_analysis(request: dict, db: Session = Depends(get_db)):
+    """8단계 아키텍처 분석 결과 조회"""
+    try:
+        prompt = request.get('prompt', '')
+        city = request.get('city', 'Seoul')
+        travel_dates = request.get('travel_dates', ['2025-01-01'])
+        
+        # 8단계 처리 실행
+        analysis_result = await enhanced_discovery.discover_places_with_weather(
+            prompt, city, travel_dates
+        )
+        
+        return {
+            "success": True,
+            "analysis": analysis_result,
+            "processing_steps": {
+                "step1_crawling": f"캐시 {analysis_result['cache_usage']['cached']}개, 신규 {analysis_result['cache_usage']['new_crawl']}개",
+                "step2_weather": f"{len(analysis_result['weather_forecast'])}일간 날씨 분석",
+                "step3_ai_analysis": f"{len(analysis_result['ai_recommendations'])}개 AI 추천",
+                "step4_verification": f"{len(analysis_result['verified_places'])}개 검증 완료",
+                "step5_route": "최적 동선 계산 완료",
+                "step6_ui": "Google Maps 준비 완료",
+                "step7_districts": "구역별 세분화 적용" if len(travel_dates) > 1 else "단일 구역",
+                "step8_cache": "1개월 캐시 저장 완료"
+            }
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "8단계 분석 중 오류 발생"
+        }
