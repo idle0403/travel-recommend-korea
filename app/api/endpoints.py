@@ -374,6 +374,17 @@ async def health_check():
     
     return status
 
+@router.get("/config")
+async def get_config():
+    """
+    🔧 **프론트엔드 설정**
+    
+    프론트엔드에서 필요한 API 키 등 설정 정보를 제공합니다.
+    """
+    return {
+        "google_maps_api_key": os.getenv("GOOGLE_MAPS_API_KEY", "")
+    }
+
 @router.post("/save-notion")
 async def save_to_notion(request: dict):
     """
