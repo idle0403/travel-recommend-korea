@@ -20,129 +20,78 @@
 - 🎨 **웹 인터페이스**: 타임라인 + 인터랙티브 지도로 직관적 UI
 - 📝 **Notion 연동**: 선택적 자동 저장 기능
 
-## 🏗️ 시스템 아키텍처 (8단계 최적화 버전)
+## 🏗️ 시스템 아키텍처
+
+### 📊 전체 구조
 
 ```mermaid
-graph TB
-    subgraph "🌐 Frontend Layer"
-        UI[Web Interface<br/>HTML/CSS/JS]
-        MAP[Google Maps<br/>실시간 지도]
-    end
+graph LR
+    A[🌐 사용자] --> B[FastAPI Server]
+    B --> C[8단계 처리 파이프라인]
+    C --> D[🎨 Web UI]
     
-    subgraph "🔧 API Layer"
-        FAST[FastAPI Server<br/>Port 8000]
-        ROUTER[API Router<br/>8단계 오케스트레이터]
-    end
+    style A fill:#e3f2fd
+    style B fill:#fff3e0
+    style C fill:#e8f5e8
+    style D fill:#fce4ec
+```
+
+### 🔄 8단계 처리 파이프라인
+
+```mermaid
+graph LR
+    Start([여행 요청]) --> Step1
     
-    subgraph "🔍 Step 1: 스마트 크롤링"
-        CACHE[Cache Manager<br/>1개월 캐시 조회]
-        CRAWLER[Naver Crawler<br/>실제 장소 수집]
-    end
+    Step1[🔍 Step 1<br/>스마트 크롤링<br/>Naver 실제 장소 수집] --> Step2
+    Step2[🌦️ Step 2<br/>날씨 분석<br/>실내/실외 필터링] --> Step3
+    Step3[🤖 Step 3<br/>AI 종합 분석<br/>GPT-4 추천] --> Step4
+    Step4[✅ Step 4<br/>검증<br/>할루시네이션 제거] --> Step5
+    Step5[🗺️ Step 5<br/>최적 동선<br/>Google Maps 경로] --> Step6
+    Step6[📱 Step 6<br/>UI 반영<br/>타임라인+지도] --> Step7
+    Step7[🏢 Step 7<br/>구역 세분화<br/>장기여행 최적화] --> Step8
+    Step8[💾 Step 8<br/>지능형 캐시<br/>PostgreSQL 저장] --> End([완성된 여행 계획])
     
-    subgraph "🌦️ Step 2: 날씨 분석"
-        WEATHER_SVC[Weather Service<br/>일자별 날씨 조회]
-        WEATHER_FILTER[Weather Filter<br/>실내/실외 필터링]
-    end
+    %% External APIs
+    Step1 -.Naver API.-> API1[(Naver)]
+    Step2 -.Weather API.-> API2[(Weather)]
+    Step3 -.OpenAI.-> API3[(GPT-4)]
+    Step4 -.Google Places.-> API4[(Google)]
+    Step5 -.Maps API.-> API4
+    Step8 -.Notion API.-> API5[(Notion)]
     
-    subgraph "🤖 Step 3: AI 종합 분석"
-        AI_SERVICE[OpenAI Service<br/>GPT-4 분석]
-        RECOMMENDATION[Smart Recommender<br/>장소+날씨 종합]
-    end
-    
-    subgraph "✅ Step 4: 할루시네이션 제거"
-        VERIFIER[Place Verifier<br/>실존 검증]
-        VALIDATOR[Cross Validator<br/>Naver+Google 교차검증]
-    end
-    
-    subgraph "🗺️ Step 5: 최적 동선"
-        ROUTE_OPT[Route Optimizer<br/>최단 경로 계산]
-        TRANSPORT[Transport Service<br/>실시간 교통정보]
-    end
-    
-    subgraph "📱 Step 6: UI 반영"
-        UI_RENDERER[UI Renderer<br/>타임라인 생성]
-        MAP_RENDERER[Map Renderer<br/>지도 마커+경로]
-    end
-    
-    subgraph "🏢 Step 7: 구역별 세분화"
-        DISTRICT[District Manager<br/>장기여행 구역 분할]
-        CLUSTER[Place Clusterer<br/>구역별 추가 크롤링]
-    end
-    
-    subgraph "💾 Step 8: 지능형 캐시"
-        CACHE_SAVE[Cache Saver<br/>PostgreSQL 저장]
-        NOTION_SAVE[Notion Saver<br/>선택적 저장]
-    end
-    
-    subgraph "🔗 External APIs"
-        NAVER[Naver API]
-        GMAPS[Google Maps API]
-        WEATHER[Weather API]
-        NOTION[Notion API]
-    end
-    
-    subgraph "💾 Database"
-        POSTGRES[(PostgreSQL<br/>1개월 캐시)]
-    end
-    
-    %% Flow connections
-    UI --> FAST
-    FAST --> ROUTER
-    
-    %% Step 1
-    ROUTER --> CACHE
-    CACHE --> CRAWLER
-    CRAWLER --> NAVER
-    
-    %% Step 2
-    ROUTER --> WEATHER_SVC
-    WEATHER_SVC --> WEATHER
-    WEATHER_SVC --> WEATHER_FILTER
-    
-    %% Step 3
-    CRAWLER --> AI_SERVICE
-    WEATHER_FILTER --> AI_SERVICE
-    AI_SERVICE --> RECOMMENDATION
-    
-    %% Step 4
-    RECOMMENDATION --> VERIFIER
-    VERIFIER --> VALIDATOR
-    VALIDATOR --> NAVER
-    VALIDATOR --> GMAPS
-    
-    %% Step 5
-    VALIDATOR --> ROUTE_OPT
-    ROUTE_OPT --> GMAPS
-    ROUTE_OPT --> TRANSPORT
-    
-    %% Step 6
-    ROUTE_OPT --> UI_RENDERER
-    ROUTE_OPT --> MAP_RENDERER
-    MAP_RENDERER --> MAP
-    UI_RENDERER --> UI
-    
-    %% Step 7
-    ROUTE_OPT --> DISTRICT
-    DISTRICT --> CLUSTER
-    CLUSTER --> NAVER
-    
-    %% Step 8
-    CLUSTER --> CACHE_SAVE
-    ROUTE_OPT --> CACHE_SAVE
-    CACHE_SAVE --> POSTGRES
-    UI_RENDERER --> NOTION_SAVE
-    NOTION_SAVE --> NOTION
+    %% Database
+    Step1 -.캐시 조회.-> DB[(PostgreSQL)]
+    Step8 -.캐시 저장.-> DB
     
     %% Styling
-    style CACHE fill:#e8f5e8
-    style WEATHER_FILTER fill:#e3f2fd
-    style AI_SERVICE fill:#fff3e0
-    style VERIFIER fill:#fce4ec
-    style ROUTE_OPT fill:#f3e5f5
-    style UI_RENDERER fill:#fff9c4
-    style DISTRICT fill:#e1f5fe
-    style CACHE_SAVE fill:#f1f8e9
+    style Start fill:#e1f5fe
+    style End fill:#c8e6c9
+    style Step1 fill:#e8f5e8
+    style Step2 fill:#e3f2fd
+    style Step3 fill:#fff3e0
+    style Step4 fill:#fce4ec
+    style Step5 fill:#f3e5f5
+    style Step6 fill:#fff9c4
+    style Step7 fill:#e1f5fe
+    style Step8 fill:#f1f8e9
+    style DB fill:#ffebee
+    style API1 fill:#f5f5f5
+    style API2 fill:#f5f5f5
+    style API3 fill:#f5f5f5
+    style API4 fill:#f5f5f5
+    style API5 fill:#f5f5f5
 ```
+
+### 🎯 핵심 컴포넌트
+
+| Layer | 컴포넌트 | 역할 |
+|-------|---------|------|
+| **Frontend** | Web Interface | 사용자 입력 및 결과 표시 |
+| | Google Maps UI | 인터랙티브 지도 및 경로 |
+| **Backend** | FastAPI Server | REST API 제공 |
+| | 8단계 Pipeline | 여행 계획 생성 워크플로우 |
+| **Data** | PostgreSQL | 1개월 캐시 저장소 |
+| **External** | Naver/Google/OpenAI | 실시간 데이터 연동 |
 
 ## ✨ 주요 기능
 
