@@ -22,76 +22,73 @@
 
 ## 🏗️ 시스템 아키텍처
 
-### 📊 전체 구조
-
 ```mermaid
-graph LR
-    A[🌐 사용자] --> B[FastAPI Server]
-    B --> C[8단계 처리 파이프라인]
-    C --> D[🎨 Web UI]
+graph TB
+    subgraph Frontend["Presentation Layer"]
+        UI[Web Interface<br/>HTML/CSS/JavaScript]
+        MAP[Google Maps UI<br/>Interactive Map]
+    end
     
-    style A fill:#e3f2fd
-    style B fill:#fff3e0
-    style C fill:#e8f5e8
-    style D fill:#fce4ec
-```
-
-### 🔄 8단계 처리 파이프라인
-
-```mermaid
-graph LR
-    Start([여행 요청]) --> Step1
+    subgraph API["Application Layer"]
+        REST[FastAPI REST API<br/>Port 8000]
+    end
     
-    Step1[🔍 Step 1<br/>스마트 크롤링<br/>Naver 실제 장소 수집] --> Step2
-    Step2[🌦️ Step 2<br/>날씨 분석<br/>실내/실외 필터링] --> Step3
-    Step3[🤖 Step 3<br/>AI 종합 분석<br/>GPT-4 추천] --> Step4
-    Step4[✅ Step 4<br/>검증<br/>할루시네이션 제거] --> Step5
-    Step5[🗺️ Step 5<br/>최적 동선<br/>Google Maps 경로] --> Step6
-    Step6[📱 Step 6<br/>UI 반영<br/>타임라인+지도] --> Step7
-    Step7[🏢 Step 7<br/>구역 세분화<br/>장기여행 최적화] --> Step8
-    Step8[💾 Step 8<br/>지능형 캐시<br/>PostgreSQL 저장] --> End([완성된 여행 계획])
+    subgraph Pipeline["8-Step Processing Pipeline"]
+        direction LR
+        S1[Step 1<br/>Smart Crawling] --> S2[Step 2<br/>Weather Analysis]
+        S2 --> S3[Step 3<br/>AI Analysis]
+        S3 --> S4[Step 4<br/>Verification]
+        S4 --> S5[Step 5<br/>Route Optimization]
+        S5 --> S6[Step 6<br/>UI Rendering]
+        S6 --> S7[Step 7<br/>District Segmentation]
+        S7 --> S8[Step 8<br/>Intelligent Cache]
+    end
     
-    %% External APIs
-    Step1 -.Naver API.-> API1[(Naver)]
-    Step2 -.Weather API.-> API2[(Weather)]
-    Step3 -.OpenAI.-> API3[(GPT-4)]
-    Step4 -.Google Places.-> API4[(Google)]
-    Step5 -.Maps API.-> API4
-    Step8 -.Notion API.-> API5[(Notion)]
+    subgraph External["External APIs"]
+        NAVER[Naver Search API<br/>Place & Blog Data]
+        WEATHER[OpenWeatherMap API<br/>Weather Forecast]
+        OPENAI[OpenAI GPT-4<br/>Natural Language Processing]
+        GOOGLE[Google Maps/Places API<br/>Route & Validation]
+        NOTION[Notion API<br/>Document Export]
+    end
     
-    %% Database
-    Step1 -.캐시 조회.-> DB[(PostgreSQL)]
-    Step8 -.캐시 저장.-> DB
+    subgraph Data["Data Layer"]
+        DB[(PostgreSQL<br/>30-Day Cache)]
+    end
+    
+    %% User Flow
+    UI -->|Travel Request| REST
+    REST -->|Process| S1
+    S8 -->|Result| REST
+    REST -->|Response| UI
+    REST -->|Map Data| MAP
+    
+    %% Pipeline to External APIs
+    S1 -.->|Crawl Places| NAVER
+    S2 -.->|Get Weather| WEATHER
+    S3 -.->|AI Recommendation| OPENAI
+    S4 -.->|Cross-Validate| NAVER
+    S4 -.->|Verify Places| GOOGLE
+    S5 -.->|Calculate Routes| GOOGLE
+    S8 -.->|Optional Save| NOTION
+    
+    %% Database Interactions
+    S1 -.->|Cache Check| DB
+    S8 -.->|Cache Save| DB
     
     %% Styling
-    style Start fill:#e1f5fe
-    style End fill:#c8e6c9
-    style Step1 fill:#e8f5e8
-    style Step2 fill:#e3f2fd
-    style Step3 fill:#fff3e0
-    style Step4 fill:#fce4ec
-    style Step5 fill:#f3e5f5
-    style Step6 fill:#fff9c4
-    style Step7 fill:#e1f5fe
-    style Step8 fill:#f1f8e9
-    style DB fill:#ffebee
-    style API1 fill:#f5f5f5
-    style API2 fill:#f5f5f5
-    style API3 fill:#f5f5f5
-    style API4 fill:#f5f5f5
-    style API5 fill:#f5f5f5
+    classDef frontendStyle fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef apiStyle fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef pipelineStyle fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
+    classDef externalStyle fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef dataStyle fill:#ffebee,stroke:#c62828,stroke-width:2px
+    
+    class UI,MAP frontendStyle
+    class REST apiStyle
+    class S1,S2,S3,S4,S5,S6,S7,S8 pipelineStyle
+    class NAVER,WEATHER,OPENAI,GOOGLE,NOTION externalStyle
+    class DB dataStyle
 ```
-
-### 🎯 핵심 컴포넌트
-
-| Layer | 컴포넌트 | 역할 |
-|-------|---------|------|
-| **Frontend** | Web Interface | 사용자 입력 및 결과 표시 |
-| | Google Maps UI | 인터랙티브 지도 및 경로 |
-| **Backend** | FastAPI Server | REST API 제공 |
-| | 8단계 Pipeline | 여행 계획 생성 워크플로우 |
-| **Data** | PostgreSQL | 1개월 캐시 저장소 |
-| **External** | Naver/Google/OpenAI | 실시간 데이터 연동 |
 
 ## ✨ 주요 기능
 
