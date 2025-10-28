@@ -4,19 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🇰🇷 스마트 한국 여행 플래너</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🇰🇷</text></svg>">
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <script>
-        // Google Maps API 키를 서버에서 가져와서 동적으로 로드
-        fetch('/api/travel/config')
-            .then(response => response.json())
-            .then(config => {
-                const script = document.createElement('script');
-                script.src = `https://maps.googleapis.com/maps/api/js?key=${config.google_maps_api_key}&libraries=places,geometry&callback=initializeApp`;
-                document.head.appendChild(script);
-            })
-            .catch(error => console.error('API 키 로드 실패:', error));
-    </script>
 </head>
 <body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
     <div class="container mx-auto px-4 py-8">
@@ -262,6 +252,15 @@
                             </div>
                         </div>
                         <div id="map" class="w-full h-96 rounded-lg"></div>
+                        
+                        <!-- 경로 선택 버튼 영역 -->
+                        <div id="routeSection" class="mt-4 hidden">
+                            <div class="border-t pt-4">
+                                <h4 class="font-semibold text-gray-700 mb-3">🚗 경로 선택</h4>
+                                <div id="routeButtons"></div>
+                                <div id="routeDetails" class="mt-3 text-sm text-gray-600"></div>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Weather Info -->
@@ -334,6 +333,30 @@
             </div>
         </div>
     </div>
+    
+    <!-- ✅ script.js를 body 끝에서 로드 -->
     <script src="script.js"></script>
+    <script>
+        // DOM 로드 완료 후 Google Maps API 로드
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', loadGoogleMaps);
+        } else {
+            loadGoogleMaps();
+        }
+        
+        function loadGoogleMaps() {
+            console.log('Loading Google Maps API...');
+            fetch('/api/travel/config')
+                .then(response => response.json())
+                .then(config => {
+                    console.log('Config loaded:', config);
+                    const script = document.createElement('script');
+                    script.src = `https://maps.googleapis.com/maps/api/js?key=${config.google_maps_api_key}&libraries=places,geometry&callback=initializeApp`;
+                    script.onerror = () => console.error('Google Maps API 로드 실패');
+                    document.head.appendChild(script);
+                })
+                .catch(error => console.error('API 키 로드 실패:', error));
+        }
+    </script>
 </body>
 </html>

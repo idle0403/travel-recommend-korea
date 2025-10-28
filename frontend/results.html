@@ -64,6 +64,47 @@
                         <div id="map" class="w-full h-96 rounded-lg"></div>
                     </div>
 
+                    <!-- 경로 안내 -->
+                    <div class="bg-white rounded-lg shadow-lg p-6">
+                        <h3 class="text-lg font-semibold text-gray-800 mb-4">
+                            <i class="fas fa-route text-blue-500"></i> 경로 안내
+                        </h3>
+                        <div id="routeSection">
+                            <p class="text-sm text-gray-600 mb-3">다음 장소로 가는 경로를 확인하세요</p>
+                            <div id="routeSelector" class="hidden">
+                                <div class="mb-3">
+                                    <label class="text-sm font-medium text-gray-700">출발지</label>
+                                    <input type="text" id="routeOrigin" readonly 
+                                           class="w-full mt-1 p-2 border rounded bg-gray-50 text-sm">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="text-sm font-medium text-gray-700">목적지</label>
+                                    <input type="text" id="routeDestination" readonly 
+                                           class="w-full mt-1 p-2 border rounded bg-gray-50 text-sm">
+                                </div>
+                                <div class="flex space-x-2 mb-3">
+                                    <button onclick="showRoute('transit')" 
+                                            class="flex-1 px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition">
+                                        <i class="fas fa-subway"></i> 대중교통
+                                    </button>
+                                    <button onclick="showRoute('driving')" 
+                                            class="flex-1 px-3 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition">
+                                        <i class="fas fa-car"></i> 자동차
+                                    </button>
+                                    <button onclick="showRoute('walking')" 
+                                            class="flex-1 px-3 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 transition">
+                                        <i class="fas fa-walking"></i> 도보
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="routeResult" class="hidden"></div>
+                            <div id="routeLoading" class="hidden text-center py-4">
+                                <i class="fas fa-spinner fa-spin text-2xl text-blue-500"></i>
+                                <p class="text-sm text-gray-600 mt-2">경로를 찾는 중...</p>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Notion 저장 -->
                     <div class="bg-white rounded-lg shadow-lg p-6">
                         <h3 class="text-lg font-semibold text-gray-800 mb-3">
@@ -228,27 +269,45 @@
             const timeline = document.getElementById('dailyTimeline');
             timeline.innerHTML = '';
             
+            // dayData를 전역으로 저장
+            window.currentDayData = dayData;
+            
             dayData.forEach((item, index) => {
                 const div = document.createElement('div');
-                div.className = 'p-4 bg-gray-50 rounded-lg mb-4 hover:bg-gray-100 transition-colors cursor-pointer';
-                div.onclick = () => showPlaceModal(item);
+                div.className = 'p-4 bg-gray-50 rounded-lg mb-4 hover:bg-gray-100 transition-colors';
                 
                 div.innerHTML = `
-                    <div class="flex items-center space-x-2 mb-2">
-                        <span class="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm">${index + 1}</span>
-                        <span class="font-semibold text-blue-600">${item.time || '시간 미정'}</span>
-                        <span class="text-sm text-gray-500">• ${item.duration || '30분'}</span>
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center space-x-2">
+                            <span class="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm">${index + 1}</span>
+                            <span class="font-semibold text-blue-600">${item.time || '시간 미정'}</span>
+                            <span class="text-sm text-gray-500">• ${item.duration || '30분'}</span>
+                        </div>
+                        ${index < dayData.length - 1 ? `
+                            <button onclick="selectRouteForPlace(${index}); event.stopPropagation();" 
+                                    class="px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600 transition">
+                                <i class="fas fa-route mr-1"></i>경로 보기
+                            </button>
+                        ` : ''}
                     </div>
-                    <h4 class="font-medium text-gray-800 mb-1">${item.place_name || item.name || item.activity}</h4>
-                    <p class="text-sm text-gray-600 mb-2">${item.description || ''}</p>
-                    <div class="text-xs text-gray-500">
-                        <span><i class="fas fa-map-marker-alt"></i> ${item.address || item.location || ''}</span>
-                        ${item.price ? `<span class="ml-4"><i class="fas fa-won-sign"></i> ${item.price}</span>` : ''}
-                        ${item.rating ? `<span class="ml-4"><i class="fas fa-star text-yellow-400"></i> ${item.rating}</span>` : ''}
+                    <div onclick="showPlaceModalByIndex(${index})" class="cursor-pointer">
+                        <h4 class="font-medium text-gray-800 mb-1">${item.place_name || item.name || item.activity}</h4>
+                        <p class="text-sm text-gray-600 mb-2">${item.description || ''}</p>
+                        <div class="text-xs text-gray-500">
+                            <span><i class="fas fa-map-marker-alt"></i> ${item.address || item.location || ''}</span>
+                            ${item.price ? `<span class="ml-4"><i class="fas fa-won-sign"></i> ${item.price}</span>` : ''}
+                            ${item.rating ? `<span class="ml-4"><i class="fas fa-star text-yellow-400"></i> ${item.rating}</span>` : ''}
+                        </div>
                     </div>
                 `;
                 timeline.appendChild(div);
             });
+        }
+
+        function showPlaceModalByIndex(index) {
+            if (window.currentDayData && window.currentDayData[index]) {
+                showPlaceModal(window.currentDayData[index]);
+            }
         }
 
         function displayPlaceDetails(dayData) {
@@ -421,9 +480,239 @@
             };
         }
 
+        // 경로 안내 관련 함수들
+        let currentRouteData = null;
+
+        function selectRouteForPlace(placeIndex) {
+            const dayData = dayGroups[currentDay];
+            if (!dayData || placeIndex >= dayData.length - 1) {
+                alert('마지막 장소입니다. 다음 장소가 없습니다.');
+                return;
+            }
+
+            const origin = dayData[placeIndex];
+            const destination = dayData[placeIndex + 1];
+
+            currentRouteData = { origin, destination };
+
+            // 경로 선택 UI 표시
+            document.getElementById('routeSelector').classList.remove('hidden');
+            document.getElementById('routeOrigin').value = origin.place_name || origin.name;
+            document.getElementById('routeDestination').value = destination.place_name || destination.name;
+            document.getElementById('routeResult').classList.add('hidden');
+
+            // 스크롤
+            document.getElementById('routeSection').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        async function showRoute(mode) {
+            if (!currentRouteData) {
+                alert('먼저 출발지와 목적지를 선택해주세요.');
+                return;
+            }
+
+            const { origin, destination } = currentRouteData;
+
+            // 로딩 표시
+            document.getElementById('routeLoading').classList.remove('hidden');
+            document.getElementById('routeResult').classList.add('hidden');
+
+            try {
+                // 장소 이름 또는 주소 사용
+                const originName = origin.place_name || origin.name;
+                const destinationName = destination.place_name || destination.name;
+
+                // API 호출
+                const response = await fetch('/api/travel/route-directions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        origin: originName,
+                        destination: destinationName,
+                        mode: mode
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    displayRouteResult(data, mode);
+                } else {
+                    throw new Error(data.detail || '경로를 찾을 수 없습니다.');
+                }
+            } catch (error) {
+                console.error('경로 조회 오류:', error);
+                document.getElementById('routeResult').innerHTML = `
+                    <div class="bg-red-50 border border-red-200 rounded p-3">
+                        <p class="text-red-600 text-sm">
+                            <i class="fas fa-exclamation-triangle mr-1"></i>
+                            경로 조회 실패: ${error.message}
+                        </p>
+                    </div>
+                `;
+                document.getElementById('routeResult').classList.remove('hidden');
+            } finally {
+                document.getElementById('routeLoading').classList.add('hidden');
+            }
+        }
+
+        function displayRouteResult(data, mode) {
+            const resultDiv = document.getElementById('routeResult');
+            const directions = data.directions;
+
+            const modeIcons = {
+                'transit': '🚇',
+                'driving': '🚗',
+                'walking': '🚶'
+            };
+
+            const modeNames = {
+                'transit': '대중교통',
+                'driving': '자동차',
+                'walking': '도보'
+            };
+
+            let html = `
+                <div class="border-t pt-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <h4 class="font-semibold text-gray-800">
+                            ${modeIcons[mode]} ${modeNames[mode]} 경로
+                        </h4>
+                        <div class="text-right">
+                            <div class="text-lg font-bold text-blue-600">${directions.total_duration}</div>
+                            <div class="text-xs text-gray-500">${directions.total_distance}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="space-y-2">
+                        ${directions.steps.map((step, index) => `
+                            <div class="flex items-start space-x-2 p-2 bg-gray-50 rounded">
+                                <span class="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs flex-shrink-0">
+                                    ${index + 1}
+                                </span>
+                                <div class="flex-1">
+                                    <div class="text-sm text-gray-700">${step.instruction.replace(/<[^>]*>/g, '')}</div>
+                                    <div class="text-xs text-gray-500 mt-1">
+                                        ${step.distance} • ${step.duration}
+                                        ${step.transit_line ? `<br><span class="font-medium text-blue-600">${step.transit_line}</span>` : ''}
+                                        ${step.departure_stop ? `<br>${step.departure_stop} → ${step.arrival_stop}` : ''}
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+
+            resultDiv.innerHTML = html;
+            resultDiv.classList.remove('hidden');
+        }
+
         function showPlaceModal(place) {
-            // 모달 구현 (기존 코드와 동일)
-            alert(`${place.place_name || place.name}의 상세 정보를 표시합니다.`);
+            // 모달 HTML 생성
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
+            modal.onclick = (e) => {
+                if (e.target === modal) modal.remove();
+            };
+            
+            modal.innerHTML = `
+                <div class="bg-white rounded-lg max-w-2xl w-full max-h-screen overflow-y-auto">
+                    <div class="p-6">
+                        <!-- 헤더 -->
+                        <div class="flex justify-between items-start mb-4">
+                            <h2 class="text-2xl font-bold text-gray-800">${place.place_name || place.name}</h2>
+                            <button onclick="this.closest('.fixed').remove()" class="text-gray-500 hover:text-gray-700">
+                                <i class="fas fa-times text-2xl"></i>
+                            </button>
+                        </div>
+                        
+                        <!-- 기본 정보 -->
+                        <div class="mb-4">
+                            <div class="flex items-center space-x-4 text-sm text-gray-600 mb-2">
+                                ${place.rating ? `<span><i class="fas fa-star text-yellow-400"></i> ${place.rating}/5</span>` : ''}
+                                ${place.price ? `<span><i class="fas fa-won-sign"></i> ${place.price}</span>` : ''}
+                                ${place.duration ? `<span><i class="fas fa-clock"></i> ${place.duration}</span>` : ''}
+                            </div>
+                            <p class="text-gray-700 mb-2">${place.description || ''}</p>
+                            <p class="text-sm text-gray-600"><i class="fas fa-map-marker-alt"></i> ${place.address || place.location || ''}</p>
+                            ${place.phone ? `<p class="text-sm text-gray-600 mt-1"><i class="fas fa-phone"></i> ${place.phone}</p>` : ''}
+                            ${place.transportation ? `<p class="text-sm text-gray-600 mt-1"><i class="fas fa-subway"></i> ${place.transportation}</p>` : ''}
+                        </div>
+                        
+                        <!-- 블로그 후기 링크 -->
+                        ${place.blog_reviews && place.blog_reviews.length > 0 ? `
+                            <div class="mb-4 border-t pt-4">
+                                <h3 class="font-semibold text-gray-800 mb-3">
+                                    <i class="fas fa-blog text-blue-500"></i> 네이버 블로그 실제 방문 후기 (${place.blog_reviews.length}개)
+                                </h3>
+                                <div class="space-y-2">
+                                    ${place.blog_reviews.slice(0, 5).map(blog => `
+                                        <a href="${blog.link || blog.url}" target="_blank" 
+                                           class="block p-3 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors">
+                                            <div class="flex items-start space-x-2">
+                                                <i class="fas fa-external-link-alt text-blue-600 mt-1"></i>
+                                                <div class="flex-1">
+                                                    <p class="text-sm font-medium text-gray-800">${blog.title}</p>
+                                                    ${blog.description ? `<p class="text-xs text-gray-600 mt-1 line-clamp-2">${blog.description}</p>` : ''}
+                                                    ${blog.bloggername ? `<p class="text-xs text-gray-500 mt-1">작성자: ${blog.bloggername}</p>` : ''}
+                                                </div>
+                                            </div>
+                                        </a>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        ` : '<div class="mb-4 border-t pt-4"><p class="text-sm text-gray-500">블로그 후기 정보가 없습니다.</p></div>'}
+                        
+                        <!-- 블로그 내용 요약 -->
+                        ${place.blog_contents && place.blog_contents.length > 0 ? `
+                            <div class="mb-4 border-t pt-4">
+                                <h3 class="font-semibold text-gray-800 mb-3">
+                                    <i class="fas fa-comment-dots text-green-500"></i> 후기 내용 요약
+                                </h3>
+                                <div class="space-y-3">
+                                    ${place.blog_contents.slice(0, 3).map(content => `
+                                        <div class="p-3 bg-yellow-50 rounded-lg">
+                                            <p class="text-sm text-gray-700 mb-2">${content.summary || content.content?.substring(0, 200) || '내용을 불러오는 중...'}</p>
+                                            ${content.keywords && content.keywords.length > 0 ? `
+                                                <div class="flex flex-wrap gap-1 mb-2">
+                                                    ${content.keywords.map(kw => `<span class="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded">${kw}</span>`).join('')}
+                                                </div>
+                                            ` : ''}
+                                            ${content.url ? `
+                                                <a href="${content.url}" target="_blank" class="text-xs text-blue-600 hover:underline">
+                                                    <i class="fas fa-external-link-alt mr-1"></i>전체 내용 보기
+                                                </a>
+                                            ` : ''}
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                        
+                        <!-- Google 정보 -->
+                        ${place.google_info && place.google_info.name ? `
+                            <div class="mb-4 border-t pt-4">
+                                <h3 class="font-semibold text-gray-800 mb-3">
+                                    <i class="fab fa-google text-red-500"></i> Google 정보
+                                </h3>
+                                ${place.google_info.rating ? `<p class="text-sm text-gray-600">평점: ${place.google_info.rating}/5</p>` : ''}
+                                ${place.google_info.website ? `<p class="text-sm text-gray-600 mt-1"><a href="${place.google_info.website}" target="_blank" class="text-blue-600 hover:underline">웹사이트</a></p>` : ''}
+                            </div>
+                        ` : ''}
+                        
+                        <!-- 닫기 버튼 -->
+                        <div class="flex justify-end mt-6">
+                            <button onclick="this.closest('.fixed').remove()" 
+                                    class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600">
+                                닫기
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
         }
     </script>
 </body>

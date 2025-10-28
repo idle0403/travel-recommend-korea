@@ -92,14 +92,19 @@ class EnhancedPlaceDiscoveryService:
         
         # 네이버 검색
         naver_places = await self.naver_service.search_places(search_query, display=15)
-        blog_reviews = await self.naver_service.search_blogs(f"{search_query} 후기", display=10)
         
         enhanced_places = []
         for place in naver_places:
+            place_name = place.get('name', '')
+            
             # 구글 정보 추가
             google_details = await self.google_service.get_place_details(
-                place.get('name', ''), place.get('address', '')
+                place_name, place.get('address', '')
             )
+            
+            # ✅ 각 장소별로 개별 블로그 검색
+            blog_reviews = await self.naver_service.search_blogs(f"{place_name} 후기", display=5)
+            print(f"📝 {place_name}: 블로그 후기 {len(blog_reviews)}개 수집")
             
             # 블로그 크롤링
             blog_contents = []
@@ -110,7 +115,7 @@ class EnhancedPlaceDiscoveryService:
             enhanced_place = {
                 **place,
                 'google_info': google_details,
-                'blog_reviews': blog_reviews[:5],
+                'blog_reviews': blog_reviews,  # ✅ 장소별 개별 후기
                 'blog_contents': blog_contents,
                 'verified': bool(place.get('name') and google_details.get('name')),
                 'crawl_timestamp': datetime.now().isoformat()

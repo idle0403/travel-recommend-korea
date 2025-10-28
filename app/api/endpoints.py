@@ -66,6 +66,15 @@ class ItineraryItem(BaseModel):
     price: Optional[str] = Field(None, description="비용")
     lat: Optional[float] = Field(None, description="위도")
     lng: Optional[float] = Field(None, description="경도")
+    blog_reviews: Optional[List[Dict]] = Field(None, description="네이버 블로그 후기 목록")
+    blog_contents: Optional[List[Dict]] = Field(None, description="블로그 내용 전문")
+    verified: Optional[bool] = Field(None, description="실제 장소 검증 여부")
+    verification_status: Optional[str] = Field(None, description="검증 상태")
+    google_info: Optional[Dict] = Field(None, description="Google Places 정보")
+    naver_info: Optional[Dict] = Field(None, description="Naver 정보")
+    
+    class Config:
+        extra = "allow"  # 추가 필드 허용
 
 class TravelPlanResponse(BaseModel):
     """여행 계획 생성 응답"""
@@ -418,3 +427,164 @@ async def save_to_notion(request: dict):
             "error": str(e),
             "message": "Notion 저장에 실패했습니다."
         }
+
+@router.post("/route-directions")
+async def get_route_directions(request: dict):
+    """
+    🗺️ **Google Maps 경로 안내**
+    
+    출발지에서 목적지까지의 실제 경로 정보를 조회합니다.
+    
+    **지원 모드**:
+    - `transit`: 대중교통 (지하철, 버스)
+    - `driving`: 자동차
+    - `walking`: 도보
+    
+    **사용 예시**:
+    ```json
+    {
+        "origin": "서울역",
+        "destination": "경복궁",
+        "mode": "transit"
+    }
+    ```
+    
+    **응답 데이터**:
+    - 총 거리 및 소요 시간
+    - 단계별 상세 안내
+    - 대중교통 정보 (노선, 정류장 등)
+    - 지도 표시를 위한 polyline 데이터
+    """
+    try:
+        origin = request.get('origin')
+        destination = request.get('destination')
+        mode = request.get('mode', 'transit')
+        
+        if not origin or not destination:
+            raise HTTPException(status_code=400, detail="출발지와 목적지를 모두 입력해주세요.")
+        
+        google_service = GoogleMapsService()
+        
+        # 모드 검증
+        allowed_modes = ["transit", "driving", "walking"]
+        if mode not in allowed_modes:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"지원되지 않는 모드입니다. 사용 가능: {', '.join(allowed_modes)}"
+            )
+        
+        # Google Maps API로 경로 조회
+        directions = await google_service.get_directions(
+            origin=origin,
+            destination=destination,
+            mode=mode
+        )
+        
+        # None 체크 추가
+        if not directions:
+            raise HTTPException(status_code=404, detail="경로를 찾을 수 없습니다.")
+        
+        if "error" in directions:
+            raise HTTPException(status_code=404, detail=directions["error"])
+        
+        # 모드별 아이콘 및 설명 추가
+        mode_info = {
+            "transit": {"icon": "🚇", "name": "대중교통", "color": "#4285F4"},
+            "driving": {"icon": "🚗", "name": "자동차", "color": "#34A853"},
+            "walking": {"icon": "🚶", "name": "도보", "color": "#EA4335"}
+        }
+        
+        return {
+            "success": True,
+            "mode": mode,
+            "mode_info": mode_info[mode],
+            "origin": origin,
+            "destination": destination,
+            "directions": directions,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        import traceback
+        print(f"경로 조회 오류: {str(e)}")
+        print(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"경로 조회 중 오류 발생: {str(e)}")
+
+@router.post("/multi-route-directions")
+async def get_multi_route_directions(request: dict):
+    """
+    🗺️ **다중 모드 경로 비교**
+    
+    출발지에서 목적지까지 세 가지 모드(대중교통/자동차/도보)의 경로를 동시에 조회합니다.
+    
+    **사용 예시**:
+    ```json
+    {
+        "origin": "서울역",
+        "destination": "경복궁"
+    }
+    ```
+    
+    **응답 데이터**:
+    - 세 가지 모드 모두의 경로 정보
+    - 각 모드별 소요 시간 및 거리 비교
+    - 추천 모드 (가장 빠른 경로)
+    """
+    try:
+        origin = request.get('origin')
+        destination = request.get('destination')
+        
+        if not origin or not destination:
+            raise HTTPException(status_code=400, detail="출발지와 목적지를 모두 입력해주세요.")
+        
+        google_service = GoogleMapsService()
+        
+        # 세 가지 모드로 동시에 경로 조회
+        import asyncio
+        transit_task = google_service.get_directions(origin, destination, mode="transit")
+        driving_task = google_service.get_directions(origin, destination, mode="driving")
+        walking_task = google_service.get_directions(origin, destination, mode="walking")
+        
+        transit_result, driving_result, walking_result = await asyncio.gather(
+            transit_task, driving_task, walking_task, return_exceptions=True
+        )
+        
+        # 결과 포맷팅
+        results = {
+            "transit": {"icon": "🚇", "name": "대중교통", "data": transit_result if not isinstance(transit_result, Exception) else {"error": str(transit_result)}},
+            "driving": {"icon": "🚗", "name": "자동차", "data": driving_result if not isinstance(driving_result, Exception) else {"error": str(driving_result)}},
+            "walking": {"icon": "🚶", "name": "도보", "data": walking_result if not isinstance(walking_result, Exception) else {"error": str(walking_result)}}
+        }
+        
+        # 추천 모드 결정 (가장 빠른 경로)
+        valid_results = []
+        for mode, info in results.items():
+            if "error" not in info["data"]:
+                duration_text = info["data"].get("total_duration", "")
+                # "25분" 형식에서 숫자 추출
+                import re
+                duration_match = re.search(r'(\d+)', duration_text)
+                if duration_match:
+                    duration_minutes = int(duration_match.group(1))
+                    valid_results.append((mode, duration_minutes))
+        
+        recommended_mode = min(valid_results, key=lambda x: x[1])[0] if valid_results else "transit"
+        
+        return {
+            "success": True,
+            "origin": origin,
+            "destination": destination,
+            "results": results,
+            "recommended_mode": recommended_mode,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        import traceback
+        print(f"다중 경로 조회 오류: {str(e)}")
+        print(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"다중 경로 조회 중 오류 발생: {str(e)}")

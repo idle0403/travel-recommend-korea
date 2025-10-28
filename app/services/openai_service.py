@@ -27,6 +27,7 @@ from app.services.weather_recommendation_service import WeatherRecommendationSer
 from app.services.city_service import CityService
 from app.services.district_service import DistrictService
 from app.services.enhanced_place_discovery_service import EnhancedPlaceDiscoveryService
+from app.services.place_category_service import PlaceCategoryService
 
 class OpenAIService:
     def __init__(self):
@@ -73,6 +74,22 @@ class OpenAIService:
         weather_code = city_service.get_weather_code(city)
         weather_data = await weather_service.get_current_weather(weather_code)
         forecast_data = await weather_service.get_forecast(weather_code)
+        
+        # 2-1. 날씨 기반 장소 필터링 적용
+        category_service = PlaceCategoryService()
+        verified_places = discovered_data.get('verified_places', [])
+        
+        if verified_places:
+            print(f"🌦️ 날씨 기반 필터링 시작: {len(verified_places)}개 장소")
+            filtered_places = category_service.filter_places_by_weather(
+                verified_places,
+                weather_data,
+                threshold=0.3  # 낮은 임계값으로 더 많은 장소 포함
+            )
+            discovered_data['verified_places'] = filtered_places
+            discovered_data['category_stats'] = category_service.get_category_stats(filtered_places)
+            print(f"✅ 필터링 완료: {len(filtered_places)}개 장소 (제거: {len(verified_places) - len(filtered_places)}개)")
+            print(f"📊 카테고리 분포: {discovered_data['category_stats']}")
         
         # 도시별 특화 정보 및 실제 장소 데이터베이스
         city_service = CityService()
@@ -327,9 +344,11 @@ class OpenAIService:
         for item in ai_result.get('schedule', []):
             place_name = item.get('place_name', '')
             address = item.get('address', '')
+            lat = item.get('lat')
+            lng = item.get('lng')
             
-            # 중복 검사
-            if quality_service.is_duplicate(place_name, address):
+            # 강화된 중복 검사 (이름 + 주소 + 좌표)
+            if quality_service.is_duplicate(place_name, address, lat, lng):
                 print(f"⚠️ 중복 장소 제외: {place_name}")
                 continue
             
@@ -346,7 +365,12 @@ class OpenAIService:
                 # 검증된 고품질 장소
                 verified_item = quality_service.create_verified_item(item, enhanced_item, quality_score)
                 enhanced_schedule.append(verified_item)
-                quality_service.add_to_used(verified_item['place_name'], verified_item['address'])
+                quality_service.add_to_used(
+                    verified_item['place_name'], 
+                    verified_item['address'],
+                    verified_item.get('lat'),
+                    verified_item.get('lng')
+                )
                 
             elif quality_score >= 2.0:  # 낮은 품질이지만 존재하는 장소
                 # 경고와 함께 포함
@@ -358,7 +382,7 @@ class OpenAIService:
                     'blog_contents': enhanced_item.get('blog_contents', [])
                 })
                 enhanced_schedule.append(item)
-                quality_service.add_to_used(place_name, address)
+                quality_service.add_to_used(place_name, address, lat, lng)
                 
             else:
                 print(f"❌ 검증 실패로 제외: {place_name} (품질: {quality_score:.1f})")
@@ -815,17 +839,38 @@ class OpenAIService:
         enhanced_schedule = []
         verified_places = discovered_data.get('verified_places', [])
         
+        print(f"\n🔍 매칭 프로세스 시작")
+        print(f"AI 생성 장소: {len(ai_result.get('schedule', []))}개")
+        print(f"검증된 장소: {len(verified_places)}개")
+        if verified_places:
+            print(f"검증된 장소 목록: {[p.get('name', '?') for p in verified_places[:5]]}")
+        print()
+        
         # AI가 생성한 일정과 8단계 검증된 장소 매칭
         for item in ai_result.get('schedule', []):
             place_name = item.get('place_name', '')
             
+            # 정규화 함수 (띄어쓰기 제거)
+            def normalize_name(name):
+                return name.lower().replace(' ', '').replace('-', '').replace('_', '')
+            
             # 검증된 장소에서 매칭되는 장소 찾기
             matched_place = None
+            normalized_place_name = normalize_name(place_name)
+            
             for verified_place in verified_places:
-                if place_name.lower() in verified_place.get('name', '').lower() or \
-                   verified_place.get('name', '').lower() in place_name.lower():
+                verified_name = verified_place.get('name', '')
+                normalized_verified_name = normalize_name(verified_name)
+                
+                # 정규화된 이름으로 비교
+                if normalized_place_name in normalized_verified_name or \
+                   normalized_verified_name in normalized_place_name:
                     matched_place = verified_place
+                    print(f"✅ 매칭 성공: '{place_name}' ↔ '{verified_name}'")
                     break
+            
+            if not matched_place:
+                print(f"❌ 매칭 실패: '{place_name}' (검증된 장소 {len(verified_places)}개 중)")
             
             if matched_place:
                 # 검증된 데이터로 아이템 향상

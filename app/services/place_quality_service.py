@@ -4,12 +4,15 @@
 실제 장소 존재 여부 확인, 중복 제거, 할루시네이션 방지
 """
 
-from typing import Dict, Any, List, Set
+from typing import Dict, Any, List, Set, Tuple
+from app.utils.similarity import are_similar_places, are_same_location, normalize_place_name
 
 class PlaceQualityService:
     def __init__(self):
-        self.used_places: Set[str] = set()
-        self.used_addresses: Set[str] = set()
+        # 사용된 장소 목록 (이름, 주소, 좌표)
+        self.used_places: List[Dict[str, Any]] = []
+        # 빠른 조회를 위한 정규화된 이름 세트
+        self.normalized_names: Set[str] = set()
     
     def verify_real_place(self, enhanced_item: Dict[str, Any]) -> bool:
         """실제 장소 존재 여부 확인"""
@@ -21,15 +24,73 @@ class PlaceQualityService:
         verification_count = sum([has_naver, has_google, has_reviews])
         return verification_count >= 2
     
-    def is_duplicate(self, place_name: str, address: str) -> bool:
-        """중복 장소 검사"""
-        return (place_name.lower() in self.used_places or 
-                address.lower() in self.used_addresses)
+    def is_duplicate(self, place_name: str, address: str, lat: float = None, lng: float = None) -> bool:
+        """
+        강화된 중복 장소 검사
+        
+        1. 정규화된 이름으로 빠른 조회
+        2. 문자열 유사도 검사
+        3. 좌표 기반 위치 검사
+        """
+        if not place_name:
+            return False
+        
+        # 1. 정규화된 이름으로 빠른 조회
+        normalized_name = normalize_place_name(place_name)
+        if normalized_name in self.normalized_names:
+            print(f"🔍 중복 발견 (정규화 이름): {place_name}")
+            return True
+        
+        # 2. 기존 장소들과 유사도 비교
+        for used_place in self.used_places:
+            used_name = used_place.get('name', '')
+            used_address = used_place.get('address', '')
+            used_lat = used_place.get('lat')
+            used_lng = used_place.get('lng')
+            
+            # 이름 유사도 검사 (임계값: 0.85)
+            if are_similar_places(place_name, used_name, threshold=0.85):
+                print(f"🔍 중복 발견 (유사 이름): {place_name} ≈ {used_name}")
+                return True
+            
+            # 주소 유사도 검사
+            if address and used_address:
+                if are_similar_places(address, used_address, threshold=0.9):
+                    print(f"🔍 중복 발견 (유사 주소): {address} ≈ {used_address}")
+                    return True
+            
+            # 좌표 기반 위치 검사 (50m 이내)
+            if lat and lng and used_lat and used_lng:
+                if are_same_location(lat, lng, used_lat, used_lng, threshold=50.0):
+                    print(f"🔍 중복 발견 (같은 위치): {place_name} ({lat}, {lng})")
+                    return True
+        
+        return False
     
-    def add_to_used(self, place_name: str, address: str):
+    def add_to_used(self, place_name: str, address: str, lat: float = None, lng: float = None):
         """사용된 장소 목록에 추가"""
-        self.used_places.add(place_name.lower())
-        self.used_addresses.add(address.lower())
+        self.used_places.append({
+            'name': place_name,
+            'address': address,
+            'lat': lat,
+            'lng': lng
+        })
+        
+        # 정규화된 이름도 추가
+        normalized_name = normalize_place_name(place_name)
+        if normalized_name:
+            self.normalized_names.add(normalized_name)
+        
+        print(f"✅ 장소 추가: {place_name} (총 {len(self.used_places)}개)")
+    
+    def clear(self):
+        """사용된 장소 목록 초기화"""
+        self.used_places.clear()
+        self.normalized_names.clear()
+    
+    def get_used_count(self) -> int:
+        """사용된 장소 수 반환"""
+        return len(self.used_places)
     
     def calculate_quality_score(self, enhanced_item: Dict[str, Any]) -> float:
         """장소 품질 점수 계산"""

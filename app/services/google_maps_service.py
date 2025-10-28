@@ -59,10 +59,28 @@ class GoogleMapsService:
             print(f"Google Maps 최적 경로 조회 오류: {str(e)}")
             return self._mock_optimized_route(locations)
     
-    async def get_directions(self, origin: str, destination: str, waypoints: List[str] = None, mode: str = "transit") -> Dict[str, Any]:
-        """경로 및 대중교통 정보 조회"""
+    async def get_directions(
+        self, 
+        origin: str, 
+        destination: str, 
+        waypoints: List[str] = None, 
+        mode: str = "transit",
+        departure_time: str = "now",
+        use_traffic: bool = True
+    ) -> Dict[str, Any]:
+        """
+        경로 및 대중교통 정보 조회 (실시간 교통 정보 포함)
+        
+        Args:
+            origin: 출발지
+            destination: 목적지
+            waypoints: 경유지 리스트
+            mode: 이동 수단 (transit/driving/walking)
+            departure_time: 출발 시간 ("now" 또는 Unix timestamp)
+            use_traffic: 실시간 교통 정보 사용 여부
+        """
         if not self.api_key:
-            return self._mock_directions_result(origin, destination)
+            return self._mock_directions_result(origin, destination, mode)
         
         params = {
             "origin": origin,
@@ -73,21 +91,54 @@ class GoogleMapsService:
             "region": "kr"
         }
         
+        # 경로 최적화
         if waypoints:
             params["waypoints"] = "|".join(waypoints)
-            params["optimize"] = "true"  # 경로 최적화
+            params["optimize"] = "true"
+        
+        # 실시간 교통 정보 적용 (driving 모드에서만 유효)
+        if mode == "driving" and use_traffic:
+            params["departure_time"] = departure_time
+            # traffic_model: best_guess (기본), pessimistic (비관적), optimistic (낙관적)
+            params["traffic_model"] = "best_guess"
+            print(f"🚗 실시간 교통 정보 적용 (departure_time: {departure_time})")
+        
+        # 대중교통 모드에서는 출발 시간 적용
+        if mode == "transit":
+            params["departure_time"] = departure_time
+            # transit_mode: bus, subway, train, tram, rail
+            params["transit_mode"] = "subway|bus"
+            # transit_routing_preference: less_walking, fewer_transfers
+            params["transit_routing_preference"] = "fewer_transfers"
+            print(f"🚇 대중교통 최적 경로 (출발: {departure_time}, 환승 최소화)")
         
         try:
             async with create_http_session() as session:
                 async with session.get(f"{self.BASE_URL}/directions/json", params=params) as response:
                     if response.status == 200:
                         data = await response.json()
-                        return self._process_directions_result(data)
+                        print(f"📡 Google API 응답: status={data.get('status')}, routes={len(data.get('routes', []))}개")
+                        
+                        result = self._process_directions_result(data, use_traffic)
+                        # API는 성공했지만 경로를 못 찾은 경우
+                        if result and "error" in result:
+                            print(f"⚠️ 경로 없음 (status: {data.get('status')}): {result['error']}")
+                            print(f"   출발: {origin}")
+                            print(f"   도착: {destination}")
+                            return self._mock_directions_result(origin, destination, mode)
+                        
+                        print(f"✅ 실제 Google 경로: {result.get('total_distance')} / {result.get('total_duration')}")
+                        return result
                     else:
-                        return self._mock_directions_result(origin, destination)
+                        error_text = await response.text()
+                        print(f"❌ Google Maps API 오류: HTTP {response.status}")
+                        print(f"   응답: {error_text[:200]}")
+                        return self._mock_directions_result(origin, destination, mode)
         except Exception as e:
-            print(f"Google Maps 경로 조회 오류: {str(e)}")
-            return self._mock_directions_result(origin, destination)
+            import traceback
+            print(f"❌ Google Maps 경로 조회 예외: {str(e)}")
+            print(f"   Traceback: {traceback.format_exc()}")
+            return self._mock_directions_result(origin, destination, mode)
     
     async def get_place_details(self, place_name: str, location: str = "Seoul, Korea") -> Dict[str, Any]:
         """장소 상세 정보 조회"""
@@ -155,8 +206,8 @@ class GoogleMapsService:
             print(f"Google Distance Matrix 오류: {str(e)}")
             return self._mock_travel_time_result()
     
-    def _process_directions_result(self, data: Dict) -> Dict[str, Any]:
-        """경로 결과 처리"""
+    def _process_directions_result(self, data: Dict, use_traffic: bool = False) -> Dict[str, Any]:
+        """경로 결과 처리 (실시간 교통 정보 포함)"""
         if data.get("status") != "OK" or not data.get("routes"):
             return {"error": "경로를 찾을 수 없습니다"}
         
@@ -173,25 +224,42 @@ class GoogleMapsService:
                 "travel_mode": step.get("travel_mode", "")
             }
             
+            # 실시간 교통 정보가 있는 경우 (duration_in_traffic)
+            if use_traffic and step.get("duration_in_traffic"):
+                traffic_duration = step["duration_in_traffic"].get("text", "")
+                normal_duration = step.get("duration", {}).get("text", "")
+                step_info["duration"] = traffic_duration
+                step_info["normal_duration"] = normal_duration
+                step_info["has_traffic_info"] = True
+                print(f"🚦 교통 정보: 일반 {normal_duration} → 실시간 {traffic_duration}")
+            
             # 대중교통 상세 정보
             if step.get("transit_details"):
                 transit = step["transit_details"]
                 step_info.update({
                     "transit_line": transit.get("line", {}).get("name", ""),
+                    "transit_short_name": transit.get("line", {}).get("short_name", ""),
+                    "transit_vehicle": transit.get("line", {}).get("vehicle", {}).get("name", ""),
                     "departure_stop": transit.get("departure_stop", {}).get("name", ""),
                     "arrival_stop": transit.get("arrival_stop", {}).get("name", ""),
-                    "num_stops": transit.get("num_stops", 0)
+                    "departure_time": transit.get("departure_time", {}).get("text", ""),
+                    "arrival_time": transit.get("arrival_time", {}).get("text", ""),
+                    "num_stops": transit.get("num_stops", 0),
+                    "headsign": transit.get("headsign", "")
                 })
             
             steps.append(step_info)
         
-        return {
+        # 전체 경로 정보
+        result = {
             "total_distance": leg.get("distance", {}).get("text", ""),
             "total_duration": leg.get("duration", {}).get("text", ""),
             "steps": steps,
             "polyline": route.get("overview_polyline", {}).get("points", ""),
             "bounds": route.get("bounds", {})
         }
+        
+        return result
     
     def _process_optimized_route(self, data: Dict, locations: List[Dict]) -> Dict[str, Any]:
         """최적화된 경로 결과 처리"""
@@ -342,41 +410,114 @@ class GoogleMapsService:
             "waypoint_order": list(range(len(locations)))
         }
     
-    def _mock_directions_result(self, origin: str, destination: str) -> Dict[str, Any]:
-        """모의 경로 결과"""
-        return {
-            "total_distance": "5.2km",
-            "total_duration": "25분",
-            "polyline": "sample_encoded_polyline_string",
-            "bounds": {
-                "northeast": {"lat": 37.5665, "lng": 126.9780},
-                "southwest": {"lat": 37.5565, "lng": 126.9680}
-            },
-            "steps": [
-                {
-                    "instruction": f"{origin}에서 지하철역까지 도보",
-                    "distance": "300m",
-                    "duration": "4분",
-                    "travel_mode": "WALKING"
+    def _mock_directions_result(self, origin: str, destination: str, mode: str = "transit") -> Dict[str, Any]:
+        """모의 경로 결과 (모드별 다른 데이터)"""
+        if mode == "driving":
+            return {
+                "total_distance": "6.8km",
+                "total_duration": "18분",
+                "polyline": "sample_encoded_polyline_string",
+                "bounds": {
+                    "northeast": {"lat": 37.5665, "lng": 126.9780},
+                    "southwest": {"lat": 37.5565, "lng": 126.9680}
                 },
-                {
-                    "instruction": "지하철 2호선 이용",
-                    "distance": "4.5km",
-                    "duration": "18분",
-                    "travel_mode": "TRANSIT",
-                    "transit_line": "지하철 2호선",
-                    "departure_stop": "출발역",
-                    "arrival_stop": "도착역",
-                    "num_stops": 6
+                "steps": [
+                    {
+                        "instruction": f"{origin}에서 출발",
+                        "distance": "500m",
+                        "duration": "2분",
+                        "travel_mode": "DRIVING"
+                    },
+                    {
+                        "instruction": "강남대로를 따라 직진",
+                        "distance": "3.5km",
+                        "duration": "8분",
+                        "travel_mode": "DRIVING"
+                    },
+                    {
+                        "instruction": "테헤란로에서 좌회전",
+                        "distance": "2.3km",
+                        "duration": "6분",
+                        "travel_mode": "DRIVING"
+                    },
+                    {
+                        "instruction": f"{destination} 도착",
+                        "distance": "500m",
+                        "duration": "2분",
+                        "travel_mode": "DRIVING"
+                    }
+                ]
+            }
+        elif mode == "walking":
+            return {
+                "total_distance": "4.2km",
+                "total_duration": "52분",
+                "polyline": "sample_encoded_polyline_string",
+                "bounds": {
+                    "northeast": {"lat": 37.5665, "lng": 126.9780},
+                    "southwest": {"lat": 37.5565, "lng": 126.9680}
                 },
-                {
-                    "instruction": f"지하철역에서 {destination}까지 도보",
-                    "distance": "400m",
-                    "duration": "3분",
-                    "travel_mode": "WALKING"
-                }
-            ]
-        }
+                "steps": [
+                    {
+                        "instruction": f"{origin}에서 남쪽으로 도보",
+                        "distance": "800m",
+                        "duration": "10분",
+                        "travel_mode": "WALKING"
+                    },
+                    {
+                        "instruction": "횡단보도를 건너서 직진",
+                        "distance": "1.5km",
+                        "duration": "18분",
+                        "travel_mode": "WALKING"
+                    },
+                    {
+                        "instruction": "공원을 통과하여 직진",
+                        "distance": "1.2km",
+                        "duration": "15분",
+                        "travel_mode": "WALKING"
+                    },
+                    {
+                        "instruction": f"{destination} 방향으로 도보",
+                        "distance": "700m",
+                        "duration": "9분",
+                        "travel_mode": "WALKING"
+                    }
+                ]
+            }
+        else:  # transit (대중교통)
+            return {
+                "total_distance": "5.2km",
+                "total_duration": "25분",
+                "polyline": "sample_encoded_polyline_string",
+                "bounds": {
+                    "northeast": {"lat": 37.5665, "lng": 126.9780},
+                    "southwest": {"lat": 37.5565, "lng": 126.9680}
+                },
+                "steps": [
+                    {
+                        "instruction": f"{origin}에서 지하철역까지 도보",
+                        "distance": "300m",
+                        "duration": "4분",
+                        "travel_mode": "WALKING"
+                    },
+                    {
+                        "instruction": "지하철 2호선 이용",
+                        "distance": "4.5km",
+                        "duration": "18분",
+                        "travel_mode": "TRANSIT",
+                        "transit_line": "지하철 2호선",
+                        "departure_stop": "출발역",
+                        "arrival_stop": "도착역",
+                        "num_stops": 6
+                    },
+                    {
+                        "instruction": f"지하철역에서 {destination}까지 도보",
+                        "distance": "400m",
+                        "duration": "3분",
+                        "travel_mode": "WALKING"
+                    }
+                ]
+            }
     
     def _mock_place_details(self, place_name: str) -> Dict[str, Any]:
         """모의 장소 상세 정보"""
