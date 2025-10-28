@@ -1223,25 +1223,54 @@ async function loadRouteOnMap(mode) {
             'walking': '#EA4335'
         };
         
-        // 좌표 파싱
-        const originCoords = currentRouteOrigin.split(',').map(s => parseFloat(s.trim()));
-        const destCoords = currentRouteDestination.split(',').map(s => parseFloat(s.trim()));
+        // 🆕 currentRouteData에서 직접 좌표 가져오기 (더 안전)
+        let originCoords, destCoords, originInput, destInput;
         
-        // 장소명이 있으면 사용, 없으면 좌표
-        let originInput, destInput;
-        
-        if (currentRouteData && currentRouteData.origin) {
-            const originName = currentRouteData.origin.place_name || currentRouteData.origin.name;
-            originInput = originName || { lat: originCoords[0], lng: originCoords[1] };
+        if (currentRouteData && currentRouteData.origin && currentRouteData.destination) {
+            // origin 처리
+            const origin = currentRouteData.origin;
+            const originLat = parseFloat(origin.lat);
+            const originLng = parseFloat(origin.lng);
+            originCoords = [originLat, originLng];
+            
+            const originName = origin.place_name || origin.name || origin.address;
+            originInput = originName || { lat: originLat, lng: originLng };
+            
+            // destination 처리
+            const destination = currentRouteData.destination;
+            const destLat = parseFloat(destination.lat);
+            const destLng = parseFloat(destination.lng);
+            destCoords = [destLat, destLng];
+            
+            const destName = destination.place_name || destination.name || destination.address;
+            destInput = destName || { lat: destLat, lng: destLng };
+            
+            console.log('📍 좌표 확인:', {
+                origin: { name: originName, lat: originLat, lng: originLng },
+                destination: { name: destName, lat: destLat, lng: destLng }
+            });
         } else {
-            originInput = { lat: originCoords[0], lng: originCoords[1] };
-        }
-        
-        if (currentRouteData && currentRouteData.destination) {
-            const destName = currentRouteData.destination.place_name || currentRouteData.destination.name;
-            destInput = destName || { lat: destCoords[0], lng: destCoords[1] };
-        } else {
-            destInput = { lat: destCoords[0], lng: destCoords[1] };
+            // fallback: currentRouteOrigin/Destination 문자열 파싱
+            console.log('⚠️ fallback 모드: 문자열 파싱');
+            
+            // 좌표 문자열인지 확인 (쉼표 포함 여부)
+            if (currentRouteOrigin.includes(',')) {
+                originCoords = currentRouteOrigin.split(',').map(s => parseFloat(s.trim()));
+                originInput = { lat: originCoords[0], lng: originCoords[1] };
+            } else {
+                // 장소명만 있는 경우
+                originInput = currentRouteOrigin;
+                originCoords = [37.5665, 126.9780]; // 기본값
+            }
+            
+            if (currentRouteDestination.includes(',')) {
+                destCoords = currentRouteDestination.split(',').map(s => parseFloat(s.trim()));
+                destInput = { lat: destCoords[0], lng: destCoords[1] };
+            } else {
+                // 장소명만 있는 경우
+                destInput = currentRouteDestination;
+                destCoords = [37.5665, 126.9780]; // 기본값
+            }
         }
         
         console.log('📍 경로 요청:', {
@@ -1384,6 +1413,42 @@ async function loadRouteOnMap(mode) {
                 
             } else {
                 console.error('❌ 경로 검색 실패:', status);
+                console.error('실패 원인 상세:', {
+                    status: status,
+                    originInput: originInput,
+                    destInput: destInput,
+                    originCoords: originCoords,
+                    destCoords: destCoords
+                });
+                
+                // 🆕 좌표 유효성 검증
+                const isValidCoords = (coords) => {
+                    return coords && 
+                           coords.length === 2 && 
+                           !isNaN(coords[0]) && 
+                           !isNaN(coords[1]) &&
+                           coords[0] !== 0 && 
+                           coords[1] !== 0;
+                };
+                
+                if (!isValidCoords(originCoords) || !isValidCoords(destCoords)) {
+                    console.error('❌ 유효하지 않은 좌표:', { originCoords, destCoords });
+                    
+                    if (routeDetails) {
+                        routeDetails.innerHTML = `
+                            <div class="bg-red-50 p-3 rounded border border-red-200">
+                                <div class="text-sm text-red-800 mb-2">
+                                    <i class="fas fa-exclamation-triangle mr-1"></i>
+                                    좌표 정보가 유효하지 않습니다
+                                </div>
+                                <div class="text-xs text-red-700">
+                                    출발지 또는 도착지의 위치 정보를 확인할 수 없습니다.
+                                </div>
+                            </div>
+                        `;
+                    }
+                    return;
+                }
                 
                 // 실패 시 직선 거리 표시
                 if (routeDetails) {
@@ -1394,14 +1459,28 @@ async function loadRouteOnMap(mode) {
                     
                     const minutes = Math.ceil(distance / (mode === 'walking' ? 80 : 300));
                     
+                    const statusMessages = {
+                        'ZERO_RESULTS': '이 지역에서는 경로를 찾을 수 없습니다',
+                        'NOT_FOUND': '출발지 또는 도착지를 찾을 수 없습니다',
+                        'INVALID_REQUEST': '잘못된 요청입니다',
+                        'OVER_QUERY_LIMIT': 'API 사용량 초과',
+                        'REQUEST_DENIED': 'API 키 오류',
+                        'UNKNOWN_ERROR': '서버 오류가 발생했습니다'
+                    };
+                    
+                    const errorMessage = statusMessages[status] || 'Google Maps에서 경로를 찾을 수 없습니다';
+                    
                     routeDetails.innerHTML = `
                         <div class="bg-yellow-50 p-3 rounded border border-yellow-200">
                             <div class="text-sm text-yellow-800 mb-2">
                                 <i class="fas fa-exclamation-triangle mr-1"></i>
-                                Google Maps에서 경로를 찾을 수 없습니다
+                                ${errorMessage}
                             </div>
                             <div class="text-xs text-yellow-700">
                                 직선 거리: ${Math.round(distance)}m (약 ${minutes}분)
+                            </div>
+                            <div class="text-xs text-gray-500 mt-1">
+                                실제 ${mode === 'walking' ? '도보' : '대중교통'} 경로는 다를 수 있습니다
                             </div>
                         </div>
                     `;
@@ -1420,13 +1499,22 @@ async function loadRouteOnMap(mode) {
                     { lat: destCoords[0], lng: destCoords[1] }
                 ];
                 
+                // 점선 스타일로 직선 표시
                 window.currentPolyline = new google.maps.Polyline({
                     path: path,
                     geodesic: true,
                     strokeColor: colors[mode],
-                    strokeOpacity: 0.6,
-                    strokeWeight: 4,
-                    strokeStyle: 'dashed',
+                    strokeOpacity: 0.5,
+                    strokeWeight: 3,
+                    icons: [{
+                        icon: {
+                            path: 'M 0,-1 0,1',
+                            strokeOpacity: 1,
+                            scale: 3
+                        },
+                        offset: '0',
+                        repeat: '20px'
+                    }],
                     map: map
                 });
                 
@@ -1434,6 +1522,11 @@ async function loadRouteOnMap(mode) {
                 bounds.extend(path[0]);
                 bounds.extend(path[1]);
                 map.fitBounds(bounds);
+                
+                console.log('✅ 직선 거리 표시 완료:', Math.round(google.maps.geometry.spherical.computeDistanceBetween(
+                    new google.maps.LatLng(originCoords[0], originCoords[1]),
+                    new google.maps.LatLng(destCoords[0], destCoords[1])
+                )) + 'm');
             }
         });
         
