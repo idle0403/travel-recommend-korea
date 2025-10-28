@@ -1058,22 +1058,21 @@ async function showRouteToNext(currentIndex, day) {
                 </div>
             </div>
         </div>
-        <div class="grid grid-cols-3 gap-2">
+        <div class="grid grid-cols-2 gap-2">
             <button onclick="loadRouteOnMap('transit')" 
-                    class="px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition text-sm font-medium">
-                <i class="fas fa-subway block mb-1"></i>
+                    class="px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition text-sm font-medium flex items-center justify-center">
+                <i class="fas fa-subway mr-2"></i>
                 대중교통
             </button>
-            <button onclick="loadRouteOnMap('driving')" 
-                    class="px-4 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition text-sm font-medium">
-                <i class="fas fa-car block mb-1"></i>
-                자동차
-            </button>
             <button onclick="loadRouteOnMap('walking')" 
-                    class="px-4 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition text-sm font-medium">
-                <i class="fas fa-walking block mb-1"></i>
+                    class="px-4 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition text-sm font-medium flex items-center justify-center">
+                <i class="fas fa-walking mr-2"></i>
                 도보
             </button>
+        </div>
+        <div class="mt-2 text-xs text-gray-500 text-center">
+            <i class="fas fa-info-circle mr-1"></i>
+            Google Maps API (대중교통/도보 지원 🗺️)
         </div>
         <button onclick="closeRouteOverlay()" 
                 class="mt-3 w-full px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition text-sm">
@@ -1213,80 +1212,67 @@ async function loadRouteOnMap(mode) {
     }
     
     try {
-        // API 호출
-        const response = await fetch('/api/travel/route-directions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                origin: currentRouteOrigin,
-                destination: currentRouteDestination,
-                mode: mode
-            })
-        });
+        // Google Maps DirectionsService 직접 사용 (백엔드 제거)
+        console.log('🗺️ Google Maps Directions API 직접 호출');
         
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-        }
-        
-        const data = await response.json();
-        console.log('✅ 경로 데이터:', data);
-        
-        // Google Maps DirectionsService 사용
         const directionsService = new google.maps.DirectionsService();
         
         // 모드별 색상 설정
         const colors = {
-            'transit': '#4285F4',    // 파란색 (대중교통)
-            'driving': '#34A853',    // 초록색 (자동차)
-            'walking': '#EA4335'     // 빨간색 (도보)
+            'transit': '#4285F4',
+            'walking': '#EA4335'
         };
         
-        // 좌표로 변환
+        // 좌표 파싱
         const originCoords = currentRouteOrigin.split(',').map(s => parseFloat(s.trim()));
         const destCoords = currentRouteDestination.split(',').map(s => parseFloat(s.trim()));
         
-        console.log('📍 경로 좌표:', { origin: originCoords, dest: destCoords, mode });
+        // 장소명이 있으면 사용, 없으면 좌표
+        let originInput, destInput;
         
-        // 거리 먼저 계산
-        const distance = google.maps.geometry.spherical.computeDistanceBetween(
-            new google.maps.LatLng(originCoords[0], originCoords[1]),
-            new google.maps.LatLng(destCoords[0], destCoords[1])
-        );
-        
-        console.log('📏 직선 거리:', Math.round(distance) + 'm');
-        
-        // 거리가 100m 미만이면 바로 직선 경로로 표시 (Google API는 너무 가까우면 ZERO_RESULTS)
-        if (distance < 100) {
-            console.log('⚡ 거리가 가까워서 직선 경로로 표시');
-            drawStraightLine(originCoords, destCoords, distance, mode, colors[mode], routeDetails);
-            return;
+        if (currentRouteData && currentRouteData.origin) {
+            const originName = currentRouteData.origin.place_name || currentRouteData.origin.name;
+            originInput = originName || { lat: originCoords[0], lng: originCoords[1] };
+        } else {
+            originInput = { lat: originCoords[0], lng: originCoords[1] };
         }
         
+        if (currentRouteData && currentRouteData.destination) {
+            const destName = currentRouteData.destination.place_name || currentRouteData.destination.name;
+            destInput = destName || { lat: destCoords[0], lng: destCoords[1] };
+        } else {
+            destInput = { lat: destCoords[0], lng: destCoords[1] };
+        }
+        
+        console.log('📍 경로 요청:', {
+            origin: originInput,
+            destination: destInput,
+            mode: mode
+        });
+        
         const request = {
-            origin: { lat: originCoords[0], lng: originCoords[1] },
-            destination: { lat: destCoords[0], lng: destCoords[1] },
+            origin: originInput,
+            destination: destInput,
             travelMode: google.maps.TravelMode[mode.toUpperCase()],
-            region: 'KR' // 한국 지역 설정
+            region: 'KR'
         };
         
-        console.log('🚗 Google Directions API 요청:', request);
-        console.log('🚗 TravelMode:', google.maps.TravelMode[mode.toUpperCase()]);
-        
         directionsService.route(request, (result, status) => {
-            console.log('🚗 Directions API 응답 상태:', status);
+            console.log('📊 Directions API 응답:', status);
             
             if (status === 'OK') {
                 // 기존 경로 제거
                 if (directionsRenderer) {
                     directionsRenderer.setMap(null);
                 }
+                if (window.currentPolyline) {
+                    window.currentPolyline.setMap(null);
+                }
                 
-                // 새 경로 렌더러 생성
+                // 새 경로 렌더러
                 directionsRenderer = new google.maps.DirectionsRenderer({
                     map: map,
-                    suppressMarkers: true,  // 기본 A/B 마커 숨김
+                    suppressMarkers: true,
                     polylineOptions: {
                         strokeColor: colors[mode],
                         strokeWeight: 5,
@@ -1301,64 +1287,88 @@ async function loadRouteOnMap(mode) {
                 
                 if (routeDetails) {
                     const modeNames = {
-                        'transit': '🚇 대중교통 (Google Maps 실제 경로)',
-                        'driving': '🚗 자동차',
+                        'transit': '🚇 대중교통',
                         'walking': '🚶 도보'
                     };
                     const modeColors = {
                         'transit': 'text-blue-600',
-                        'driving': 'text-green-600',
                         'walking': 'text-orange-600'
                     };
                     
                     let stepsHtml = '';
                     
-                    // 대중교통 상세 정보 추출
-                    if (mode === 'transit' && route.steps) {
+                    // 경로 상세 정보 (대중교통 또는 도보)
+                    if (route.steps && route.steps.length > 0) {
                         stepsHtml = '<div class="mt-3 space-y-2 max-h-60 overflow-y-auto">';
-                        route.steps.forEach((step, idx) => {
-                            if (step.travel_mode === 'TRANSIT' && step.transit) {
-                                const transit = step.transit;
-                                const line = transit.line;
-                                const lineColor = line.color || '#666';
-                                const lineText = line.short_name || line.name || '노선';
-                                const vehicleType = line.vehicle?.type || 'BUS';
-                                
-                                const vehicleIcons = {
-                                    'SUBWAY': '🚇',
-                                    'BUS': '🚌',
-                                    'TRAIN': '🚆',
-                                    'TRAM': '🚊'
-                                };
-                                const vehicleIcon = vehicleIcons[vehicleType] || '🚌';
+                        
+                        if (mode === 'transit') {
+                            // 대중교통 상세 정보
+                            route.steps.forEach((step) => {
+                                if (step.travel_mode === 'TRANSIT' && step.transit) {
+                                    const transit = step.transit;
+                                    const line = transit.line;
+                                    const lineColor = line.color || '#666';
+                                    const lineText = line.short_name || line.name || '노선';
+                                    const vehicleType = line.vehicle?.type || 'BUS';
+                                    
+                                    const vehicleIcons = {
+                                        'SUBWAY': '🚇',
+                                        'BUS': '🚌',
+                                        'TRAIN': '🚆',
+                                        'TRAM': '🚊'
+                                    };
+                                    const vehicleIcon = vehicleIcons[vehicleType] || '🚌';
+                                    
+                                    stepsHtml += `
+                                        <div class="p-2 bg-white rounded border-l-4" style="border-color: ${lineColor}">
+                                            <div class="font-medium text-sm mb-1">
+                                                ${vehicleIcon} <span style="color: ${lineColor}">${lineText}</span>
+                                            </div>
+                                            <div class="text-xs text-gray-600">
+                                                ${transit.departure_stop.name} → ${transit.arrival_stop.name}
+                                            </div>
+                                            <div class="text-xs text-gray-500 mt-1">
+                                                ${transit.num_stops}개 정류장 • ${step.duration.text}
+                                            </div>
+                                        </div>
+                                    `;
+                                } else if (step.travel_mode === 'WALKING') {
+                                    stepsHtml += `
+                                        <div class="p-2 bg-gray-50 rounded text-xs text-gray-600">
+                                            🚶 도보 ${step.distance.text} (${step.duration.text})
+                                        </div>
+                                    `;
+                                }
+                            });
+                        } else if (mode === 'walking') {
+                            // 도보 상세 정보
+                            route.steps.forEach((step, index) => {
+                                // HTML 태그 제거
+                                const instruction = step.html_instructions ? 
+                                    step.html_instructions.replace(/<[^>]*>/g, '') : 
+                                    `${index + 1}번째 구간`;
                                 
                                 stepsHtml += `
-                                    <div class="p-2 bg-white rounded border-l-4" style="border-color: ${lineColor}">
-                                        <div class="font-medium text-sm mb-1">
-                                            ${vehicleIcon} <span style="color: ${lineColor}">${lineText}</span>
+                                    <div class="p-2 bg-orange-50 rounded border-l-4 border-orange-400">
+                                        <div class="text-xs text-gray-700 mb-1">
+                                            <span class="font-medium text-orange-600">${index + 1}.</span> ${instruction}
                                         </div>
-                                        <div class="text-xs text-gray-600">
-                                            ${transit.departure_stop.name} → ${transit.arrival_stop.name}
-                                        </div>
-                                        <div class="text-xs text-gray-500 mt-1">
-                                            ${transit.num_stops}개 정류장 • ${step.duration.text}
+                                        <div class="text-xs text-gray-500">
+                                            🚶 ${step.distance.text} • ${step.duration.text}
                                         </div>
                                     </div>
                                 `;
-                            } else if (step.travel_mode === 'WALKING') {
-                                stepsHtml += `
-                                    <div class="p-2 bg-gray-50 rounded text-xs text-gray-600">
-                                        🚶 도보 ${step.distance.text} (${step.duration.text})
-                                    </div>
-                                `;
-                            }
-                        });
+                            });
+                        }
+                        
                         stepsHtml += '</div>';
                     }
                     
                     routeDetails.innerHTML = `
                         <div class="bg-gray-50 p-4 rounded-lg">
-                            <div class="font-semibold ${modeColors[mode]} mb-2">${modeNames[mode]}</div>
+                            <div class="font-semibold ${modeColors[mode]} mb-2">
+                                ${modeNames[mode]} (Google Maps 🗺️)
+                            </div>
                             <div class="text-sm text-gray-700 space-y-1">
                                 <div><strong>총 거리:</strong> ${route.distance.text}</div>
                                 <div><strong>총 소요시간:</strong> ${route.duration.text}</div>
@@ -1370,44 +1380,74 @@ async function loadRouteOnMap(mode) {
                     `;
                 }
                 
-                console.log('✅ 경로 표시 완료 (Google Maps 실제 데이터)');
-                console.log('📊 경로 상세:', route);
+                console.log('✅ 경로 표시 완료 (Google Maps)');
+                
             } else {
                 console.error('❌ 경로 검색 실패:', status);
-                console.error('❌ 요청 정보:', {
-                    origin: `${originCoords[0]}, ${originCoords[1]}`,
-                    dest: `${destCoords[0]}, ${destCoords[1]}`,
-                    mode: mode
-                });
                 
-                // 실패 원인별 처리
-                if (status === 'ZERO_RESULTS') {
-                    console.log('📍 ZERO_RESULTS - 경로를 찾을 수 없음, 직선으로 대체');
-                } else if (status === 'NOT_FOUND') {
-                    console.log('📍 NOT_FOUND - 출발지나 도착지를 찾을 수 없음');
-                } else if (status === 'REQUEST_DENIED') {
-                    console.error('📍 REQUEST_DENIED - API 키 또는 권한 문제');
-                } else if (status === 'OVER_QUERY_LIMIT') {
-                    console.error('📍 OVER_QUERY_LIMIT - API 할당량 초과');
-                } else if (status === 'INVALID_REQUEST') {
-                    console.error('📍 INVALID_REQUEST - 잘못된 요청');
+                // 실패 시 직선 거리 표시
+                if (routeDetails) {
+                    const distance = google.maps.geometry.spherical.computeDistanceBetween(
+                        new google.maps.LatLng(originCoords[0], originCoords[1]),
+                        new google.maps.LatLng(destCoords[0], destCoords[1])
+                    );
+                    
+                    const minutes = Math.ceil(distance / (mode === 'walking' ? 80 : 300));
+                    
+                    routeDetails.innerHTML = `
+                        <div class="bg-yellow-50 p-3 rounded border border-yellow-200">
+                            <div class="text-sm text-yellow-800 mb-2">
+                                <i class="fas fa-exclamation-triangle mr-1"></i>
+                                Google Maps에서 경로를 찾을 수 없습니다
+                            </div>
+                            <div class="text-xs text-yellow-700">
+                                직선 거리: ${Math.round(distance)}m (약 ${minutes}분)
+                            </div>
+                        </div>
+                    `;
                 }
                 
-                // 모든 실패 케이스에 대해 직선 경로로 대체
-                const distance = google.maps.geometry.spherical.computeDistanceBetween(
-                    new google.maps.LatLng(originCoords[0], originCoords[1]),
-                    new google.maps.LatLng(destCoords[0], destCoords[1])
-                );
+                // 직선 그리기
+                if (directionsRenderer) {
+                    directionsRenderer.setMap(null);
+                }
+                if (window.currentPolyline) {
+                    window.currentPolyline.setMap(null);
+                }
                 
-                console.log('📍 직선 거리 계산:', Math.round(distance) + 'm');
-                drawStraightLine(originCoords, destCoords, distance, mode, colors[mode], routeDetails);
+                const path = [
+                    { lat: originCoords[0], lng: originCoords[1] },
+                    { lat: destCoords[0], lng: destCoords[1] }
+                ];
+                
+                window.currentPolyline = new google.maps.Polyline({
+                    path: path,
+                    geodesic: true,
+                    strokeColor: colors[mode],
+                    strokeOpacity: 0.6,
+                    strokeWeight: 4,
+                    strokeStyle: 'dashed',
+                    map: map
+                });
+                
+                const bounds = new google.maps.LatLngBounds();
+                bounds.extend(path[0]);
+                bounds.extend(path[1]);
+                map.fitBounds(bounds);
             }
         });
         
     } catch (error) {
-        console.error('❌ 경로 API 오류:', error);
+        console.error('❌ 경로 조회 오류:', error);
         if (routeDetails) {
-            routeDetails.innerHTML = '<p class="text-sm text-red-500">경로 검색 중 오류가 발생했습니다</p>';
+            routeDetails.innerHTML = `
+                <div class="bg-red-50 p-3 rounded border border-red-200">
+                    <div class="text-sm text-red-800">
+                        <i class="fas fa-exclamation-triangle mr-1"></i>
+                        경로 조회 실패: ${error.message}
+                    </div>
+                </div>
+            `;
         }
     }
 }
@@ -1828,7 +1868,8 @@ function initMapModal() {
             marker = new google.maps.Marker({
                 position: place.geometry.location,
                 map: mapModal,
-                title: place.name
+                title: place.name,
+                animation: google.maps.Animation.DROP
             });
             
             // 지도 중심 이동
@@ -1843,11 +1884,14 @@ function initMapModal() {
                 lng: place.geometry.location.lng()
             };
             console.log('📍 장소 선택됨:', window.selectedPlace);
+            
+            // UI에 선택된 위치 표시
+            updateSelectedLocationUI();
         }
     });
     
     // 지도 클릭 이벤트
-    mapModal.addListener('click', (event) => {
+    mapModal.addListener('click', async (event) => {
         // 기존 마커 제거
         if (marker) marker.setMap(null);
         
@@ -1855,18 +1899,52 @@ function initMapModal() {
         marker = new google.maps.Marker({
             position: event.latLng,
             map: mapModal,
-            title: '선택된 위치'
+            title: '선택된 위치',
+            animation: google.maps.Animation.DROP
         });
         
-        // 선택된 위치 저장 (전역 변수)
-        window.selectedPlace = {
-            name: '선택된 위치',
-            address: `위도: ${event.latLng.lat().toFixed(6)}, 경도: ${event.latLng.lng().toFixed(6)}`,
-            lat: event.latLng.lat(),
-            lng: event.latLng.lng()
-        };
-        console.log('📍 위치 클릭됨:', window.selectedPlace);
+        // Geocoding으로 주소 가져오기
+        const geocoder = new google.maps.Geocoder();
+        try {
+            const result = await geocoder.geocode({ location: event.latLng });
+            const address = result.results[0]?.formatted_address || `위도: ${event.latLng.lat().toFixed(6)}, 경도: ${event.latLng.lng().toFixed(6)}`;
+            
+            // 선택된 위치 저장 (전역 변수)
+            window.selectedPlace = {
+                name: '선택된 위치',
+                address: address,
+                lat: event.latLng.lat(),
+                lng: event.latLng.lng()
+            };
+            console.log('📍 위치 클릭됨:', window.selectedPlace);
+            
+            // UI에 선택된 위치 표시
+            updateSelectedLocationUI();
+        } catch (error) {
+            console.error('Geocoding 오류:', error);
+            window.selectedPlace = {
+                name: '선택된 위치',
+                address: `위도: ${event.latLng.lat().toFixed(6)}, 경도: ${event.latLng.lng().toFixed(6)}`,
+                lat: event.latLng.lat(),
+                lng: event.latLng.lng()
+            };
+            updateSelectedLocationUI();
+        }
     });
+}
+
+// 선택된 위치 UI 업데이트
+function updateSelectedLocationUI() {
+    const infoDiv = document.getElementById('selectedLocationInfo');
+    const textDiv = document.getElementById('selectedLocationText');
+    
+    if (infoDiv && textDiv && window.selectedPlace) {
+        textDiv.innerHTML = `
+            <strong>${window.selectedPlace.name}</strong><br>
+            ${window.selectedPlace.address}
+        `;
+        infoDiv.classList.remove('hidden');
+    }
 }
 
 // 지도 모달 이벤트 설정
@@ -1881,11 +1959,24 @@ function setupMapModalEvents() {
             const modal = document.getElementById('mapModal');
             if (modal) {
                 modal.classList.remove('hidden');
+                
+                // 선택된 위치 정보 초기화
+                const infoDiv = document.getElementById('selectedLocationInfo');
+                const searchInput = document.getElementById('mapSearchInput');
+                if (infoDiv) infoDiv.classList.add('hidden');
+                if (searchInput) searchInput.value = '';
+                window.selectedPlace = null;
+                
                 // 지도 모달 초기화
                 setTimeout(() => {
                     if (!mapModal && typeof google !== 'undefined') {
                         console.log('지도 모달 초기화 중...');
                         initMapModal();
+                    } else if (mapModal) {
+                        // 이미 초기화된 경우, 도시 중심으로 이동
+                        const cityCenter = getCityCenter();
+                        mapModal.setCenter(cityCenter);
+                        mapModal.setZoom(13);
                     }
                 }, 100);
             }
@@ -1927,8 +2018,11 @@ function setupMapModalEvents() {
                 const modal = document.getElementById('mapModal');
                 if (modal) modal.classList.add('hidden');
                 console.log('✅ 출발지 선택 완료:', window.selectedPlace);
+                
+                // 성공 메시지 표시
+                showToast('📍 출발지가 설정되었습니다', 'success');
             } else {
-                alert('위치를 선택해주세요.');
+                showToast('⚠️ 지도에서 위치를 선택해주세요', 'warning');
                 console.error('❌ 위치가 선택되지 않았습니다.');
             }
         });

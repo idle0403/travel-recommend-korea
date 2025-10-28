@@ -140,8 +140,59 @@ class OpenAIService:
         location_context = self._build_enhanced_context(discovered_data)
         style_context = self._get_style_specific_context(travel_style)
         
+        # 🆕 계층적 지역 정보 추출
+        location_hierarchy = discovered_data.get('location_hierarchy', {})
+        requested_city = location_hierarchy.get('city', city)
+        requested_district = location_hierarchy.get('district', '')
+        requested_neighborhood = location_hierarchy.get('neighborhood', '')
+        requested_poi = location_hierarchy.get('poi', [])
+        search_radius_km = location_hierarchy.get('search_radius_km', 3.0)
+        center_lat = location_hierarchy.get('lat')
+        center_lng = location_hierarchy.get('lng')
+        
+        # 🆕 지역 맥락 정보 추출
+        local_context = discovered_data.get('local_context', {})
+        context_characteristics = ', '.join(local_context.get('location_characteristics', [])[:3]) if local_context.get('enriched') else ''
+        context_cuisines = ', '.join(local_context.get('recommended_cuisines', [])[:3]) if local_context.get('enriched') else ''
+        context_atmosphere = local_context.get('atmosphere', '') if local_context.get('enriched') else ''
+        context_best_for = ', '.join(local_context.get('best_for', [])[:2]) if local_context.get('enriched') else ''
+        
+        # 🆕 지리적 제약 텍스트 생성
+        geographic_constraint = ""
+        if requested_neighborhood:
+            geographic_constraint = f"{requested_city} {requested_district} {requested_neighborhood}"
+        elif requested_district:
+            geographic_constraint = f"{requested_city} {requested_district}"
+        else:
+            geographic_constraint = f"{requested_city}"
+        
+        poi_text = f" (특히 {', '.join(requested_poi[:2])} 근처)" if requested_poi else ""
+        
         system_prompt = f"""
 당신은 한국 여행 전문가입니다. 사용자의 요청에 따라 30분 단위로 상세한 여행 일정을 생성해주세요.
+
+**🎯 지리적 제약 (CRITICAL - 가장 중요) 🎯**
+요청 지역: {geographic_constraint}{poi_text}
+중심 좌표: ({center_lat:.4f}, {center_lng:.4f})
+검색 반경: {search_radius_km}km 이내
+위치 정밀도: {location_hierarchy.get('location_specificity', 'medium')}
+
+{'**🏙️ 지역 특성 정보 (맥락 기반 추천) 🏙️**' if local_context.get('enriched') else ''}
+{f'지역 특성: {context_characteristics}' if context_characteristics else ''}
+{f'추천 음식: {context_cuisines}' if context_cuisines else ''}
+{f'분위기: {context_atmosphere}' if context_atmosphere else ''}
+{f'최적 용도: {context_best_for}' if context_best_for else ''}
+{f'가격대: {local_context.get("target_price_range")}' if local_context.get('enriched') else ''}
+
+**❌ 절대 금지 사항 (위반 시 응답 거부):**
+1. {geographic_constraint} 외 다른 지역 장소 추천 절대 금지
+   {f'예시: {requested_neighborhood} 요청 시, 다른 동 ({self._get_example_other_districts(requested_city, requested_district, requested_neighborhood)}) 추천 절대 금지' if requested_neighborhood else ''}
+   
+2. 반경 {search_radius_km}km 초과 장소 금지
+   모든 장소는 중심점 ({center_lat:.4f}, {center_lng:.4f})으로부터 {search_radius_km}km 이내여야 함
+   
+3. 다른 도시 장소 절대 금지
+   {requested_city} 외 다른 도시 (예: 강남/종로/홍대 등 {requested_city} 외 지역) 추천 금지
 
 **🚨 절대 규칙 - 할루시네이션 금지 🚨**
 1. **실제 존재하는 장소만**: 가상의 장소, 추측한 장소 절대 금지
@@ -151,9 +202,9 @@ class OpenAIService:
 5. **불확실시 거부**: 확실하지 않으면 "해당 지역에 적합한 장소를 찾을 수 없습니다"라고 명시
 6. **지역 일치**: 요청 지역과 다른 지역 장소 추천 절대 금지
 7. **이동 거리 제한**: 연속된 장소 간 대중교통 이동시간이 20분을 초과하지 않도록 구성
-8. **도시 내 장소만**: {city} 시/도 내의 장소만 추천, 다른 도시 장소 절대 금지
-9. **지역 특화**: {city}의 실제 구/동 지역명을 사용하여 해당 지역 내 장소만 추천
-10. **도시 제한 강화**: {city} 이외의 다른 도시 장소는 절대 추천하지 말 것
+8. **검증된 장소만 사용**: 아래 제공된 검증된 장소 목록에서만 선택
+9. **좌표 확인**: 모든 장소의 좌표가 중심점으로부터 {search_radius_km}km 이내인지 확인
+10. **주소 확인**: 모든 장소의 주소에 '{geographic_constraint}'이 포함되어 있는지 확인
 
 **날씨 기반 추천 우선순위:**
 - 날씨: {weather_data['condition']}
@@ -796,6 +847,22 @@ class OpenAIService:
                         }
         
         return None
+    
+    def _get_example_other_districts(self, city: str, district: str, current_neighborhood: str) -> str:
+        """
+        🆕 다른 동 예시 생성 (AI가 피해야 할 지역)
+        """
+        from app.services.hierarchical_location_extractor import HierarchicalLocationExtractor
+        
+        extractor = HierarchicalLocationExtractor()
+        locations = extractor.KOREAN_LOCATIONS.get(city, {})
+        
+        if district and district in locations:
+            other_neighborhoods = [n for n in locations[district] if n != current_neighborhood]
+            return ', '.join(other_neighborhoods[:3])  # 최대 3개
+        
+        return "다른 동"
+    
     def _build_enhanced_context(self, discovered_data: Dict[str, Any]) -> str:
         """8단계 처리된 데이터를 AI 컨텍스트로 변환"""
         verified_places = discovered_data.get('verified_places', [])

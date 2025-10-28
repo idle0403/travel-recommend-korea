@@ -20,6 +20,7 @@ from app.services.naver_service import NaverService
 from app.services.google_maps_service import GoogleMapsService
 from app.services.weather_service import WeatherService
 from app.services.realtime_transport_service import RealtimeTransportService
+from app.services.kakao_maps_service import kakao_maps_service
 
 # 상수 정의
 DEFAULT_COORDINATES = {"lat": 37.5665, "lng": 126.9780}
@@ -588,3 +589,67 @@ async def get_multi_route_directions(request: dict):
         print(f"다중 경로 조회 오류: {str(e)}")
         print(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"다중 경로 조회 중 오류 발생: {str(e)}")
+
+
+@router.post("/route-directions-naver")
+async def get_route_directions_kakao(request: Dict[str, Any]):
+    """
+    **카카오맵 API 기반 경로 조회**
+    
+    한국 지역에 최적화된 카카오맵 API를 사용하여 정확한 경로 정보를 제공합니다.
+    
+    **요청 파라미터**:
+    - origin: 출발지 (좌표: "lat,lng" 형식)
+    - destination: 도착지 (좌표: "lat,lng" 형식)
+    - mode: 이동 수단 ("transit", "walking")
+    
+    **응답 데이터**:
+    - 경로 정보 (거리, 시간, 단계별 안내)
+    - 카카오맵 기반 정확한 한국 경로
+    """
+    try:
+        origin = request.get('origin')
+        destination = request.get('destination')
+        mode = request.get('mode', 'transit')
+        
+        if not origin or not destination:
+            raise HTTPException(status_code=400, detail="출발지와 목적지를 모두 입력해주세요.")
+        
+        # 카카오맵 API 호출
+        result = await kakao_maps_service.get_directions(origin, destination, mode)
+        
+        # Google Maps fallback이 필요한 경우 (대중교통)
+        if result.get('fallback_to_google'):
+            google_service = GoogleMapsService()
+            google_result = await google_service.get_directions(origin, destination, mode)
+            
+            return {
+                "success": True,
+                "provider": "google",
+                "directions": google_result,
+                "mode_info": {
+                    "transit": {"icon": "🚇", "name": "대중교통"},
+                    "walking": {"icon": "🚶", "name": "도보"}
+                }.get(mode, {"icon": "🚇", "name": mode})
+            }
+        
+        if not result.get('success'):
+            raise HTTPException(status_code=400, detail=result.get('error', '경로를 찾을 수 없습니다.'))
+        
+        return {
+            "success": True,
+            "provider": "kakao",
+            "directions": result,
+            "mode_info": {
+                "transit": {"icon": "🚇", "name": "대중교통"},
+                "walking": {"icon": "🚶", "name": "도보"}
+            }.get(mode, {"icon": "🚇", "name": mode})
+        }
+        
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        import traceback
+        print(f"카카오맵 경로 조회 오류: {str(e)}")
+        print(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"경로 조회 중 오류가 발생했습니다: {str(e)}")
