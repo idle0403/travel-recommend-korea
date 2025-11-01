@@ -15,8 +15,9 @@ class CacheService:
             # 연결 테스트
             self.redis_client.ping()
             self.enabled = True
-        except:
-            print("Redis 연결 실패, 캐시 비활성화")
+            print(f"✅ Redis 연결 성공: {redis_url}")
+        except Exception as e:
+            print(f"⚠️  Redis 연결 실패, 캐시 비활성화: {str(e)}")
             self.enabled = False
     
     def get(self, key: str) -> Optional[Any]:
