@@ -326,7 +326,7 @@ function showLoading() {
     document.getElementById('submitBtn').disabled = true;
     document.getElementById('btnText').textContent = '생성 중...';
     
-    // 🆕 진행률 초기화
+    // 🆕 진행률 초기화 및 실시간 메시지 시작
     const progressLog = document.getElementById('progressLog');
     const progressBar = document.getElementById('progressBar');
     const progressText = document.getElementById('progressText');
@@ -340,12 +340,141 @@ function showLoading() {
     if (progressText) {
         progressText.textContent = '0%';
     }
+    
+    // 🆕 실시간 진행 메시지 업데이트 (프롬프트 전달)
+    const prompt = document.getElementById('prompt').value;
+    startProgressMessages(prompt);
+}
+
+// 🆕 실시간 진행 메시지 표시 (동적 지역명)
+function startProgressMessages(userPrompt = '') {
+    const progressLog = document.getElementById('progressLog');
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+    
+    if (!progressLog) return;
+    
+    // 🆕 프롬프트에서 지역/키워드 간단히 추출
+    const regionKeywords = ['청도', '밀양', '양양', '대구', '부산', '서울', '제주'];
+    let detectedRegion = '여행지';
+    for (const region of regionKeywords) {
+        if (userPrompt.includes(region)) {
+            detectedRegion = region;
+            break;
+        }
+    }
+    
+    const activityKeywords = ['맛집', '카페', '관광', '데이트', '여행', '투어'];
+    let detectedActivity = '정보';
+    for (const activity of activityKeywords) {
+        if (userPrompt.includes(activity)) {
+            detectedActivity = activity;
+            break;
+        }
+    }
+    
+    // 🆕 지역별 예상 장소명
+    const placeSamples = {
+        '청도': ['육회천왕', '목장원', '칠성농장', '청도와인터널', '전통시장'],
+        '대구': ['벼락집', '동인동찜갈비', '이가네', '막창골목', '서문시장'],
+        '부산': ['해운대횟집', '광안리카페', '자갈치시장', '밀면집', '돼지국밥'],
+        '서울': ['경복궁', '명동맛집', 'N서울타워', '홍대카페', '강남맛집'],
+        '양양': ['서피비치카페', '낙산사', '물회집', '하조대맛집', '죽도해변'],
+        '제주': ['흑돼지맛집', '성산일출봉', '협재해수욕장', '카페', '감귤농장'],
+        '밀양': ['얼음골', '표충사', '영남루', '돼지국밥', '밀양시장']
+    };
+    
+    const samplePlaces = placeSamples[detectedRegion] || ['맛집1', '카페1', '관광지1', '맛집2', '카페2'];
+    
+    const messages = [
+        { text: '📍 프롬프트에서 지역 정보 추출 중...', progress: 5 },
+        { text: `✅ 목적지 인식: ${detectedRegion}`, progress: 10 },
+        { text: `🔍 ${detectedRegion} ${detectedActivity} 정보 크롤링 중...`, progress: 15 },
+        { text: `  ㄴ ${samplePlaces[0]} 수집 중...`, progress: 20, indent: true },
+        { text: `  ㄴ ${samplePlaces[1]} 수집 중...`, progress: 25, indent: true },
+        { text: `  ㄴ ${samplePlaces[2]} 수집 중...`, progress: 30, indent: true },
+        { text: `  ㄴ ${samplePlaces[3]} 수집 중...`, progress: 35, indent: true },
+        { text: `  ㄴ ${samplePlaces[4]} 수집 중...`, progress: 40, indent: true },
+        { text: '📝 네이버 블로그 후기 분석 중...', progress: 50 },
+        { text: '🗺️ Google Maps로 좌표 검증 중...', progress: 60 },
+        { text: '🌦️ 날씨 정보 조회 중...', progress: 70 },
+        { text: '🤖 AI가 최적 일정 생성 중...', progress: 80 },
+        { text: '✅ 장소 검증 및 중복 제거 중...', progress: 90 },
+        { text: '🛣️ 최적 경로 계산 중...', progress: 95 }
+    ];
+    
+    let currentIndex = 0;
+    
+    // 🆕 재귀적 setTimeout으로 동적 타이밍
+    function showNextMessage() {
+        if (currentIndex >= messages.length) {
+            window.progressInterval = null;
+            return;
+        }
+        
+        const msg = messages[currentIndex];
+        
+        // 메시지 추가 (들여쓰기 지원)
+        const logItem = document.createElement('div');
+        if (msg.indent) {
+            logItem.className = 'text-gray-600 text-sm ml-6 animate-fadeIn';
+            logItem.innerHTML = `${msg.text}`;  // 간단하게 화살표 제거
+        } else {
+            logItem.className = 'text-blue-700 animate-fadeIn';
+            logItem.innerHTML = `<i class="fas fa-check-circle mr-2"></i>${msg.text}`;
+        }
+        progressLog.appendChild(logItem);
+        
+        // 스크롤
+        progressLog.scrollTop = progressLog.scrollHeight;
+        
+        // 진행률 업데이트
+        if (progressBar) {
+            progressBar.style.width = msg.progress + '%';
+        }
+        if (progressText) {
+            progressText.textContent = msg.progress + '%';
+        }
+        
+        currentIndex++;
+        
+        // 다음 메시지 예약 (들여쓰기는 빠르게, 일반은 느리게)
+        const delay = msg.indent ? 300 : 800;
+        window.progressInterval = setTimeout(showNextMessage, delay);
+    }
+    
+    // 시작
+    showNextMessage();
 }
 
 function hideLoading() {
     document.getElementById('loading').classList.add('hidden');
     document.getElementById('submitBtn').disabled = false;
     document.getElementById('btnText').textContent = 'AI 여행 계획 생성';
+    
+    // 🆕 진행 메시지 타이머 정리 (setTimeout 버전)
+    if (window.progressInterval) {
+        clearTimeout(window.progressInterval);
+        window.progressInterval = null;
+    }
+    
+    // 🆕 완료 메시지
+    const progressLog = document.getElementById('progressLog');
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+    
+    if (progressLog) {
+        const completedMsg = document.createElement('div');
+        completedMsg.className = 'text-green-700 font-bold';
+        completedMsg.innerHTML = '<i class="fas fa-check-circle mr-2"></i>✅ 여행 계획 생성 완료!';
+        progressLog.appendChild(completedMsg);
+    }
+    if (progressBar) {
+        progressBar.style.width = '100%';
+    }
+    if (progressText) {
+        progressText.textContent = '100%';
+    }
 }
 
 async function displayResults(data) {

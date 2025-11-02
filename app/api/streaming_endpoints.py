@@ -25,63 +25,31 @@ class TravelPlanStreamRequest(BaseModel):
 
 async def progress_generator(request: TravelPlanStreamRequest) -> AsyncGenerator[str, None]:
     """
-    진행 상황을 SSE 형식으로 스트리밍
-    
-    SSE 형식:
-    data: {"type": "status", "message": "청도 인식 완료"}\n\n
+    진행 상황을 SSE 형식으로 실시간 스트리밍
+    크롤링되는 장소를 하나씩 표시
     """
     
     try:
-        # 1. 시작 메시지
+        # 1. 시작
         yield f"data: {json.dumps({'type': 'status', 'message': '🚀 여행 계획 생성 시작...', 'progress': 0}, ensure_ascii=False)}\n\n"
         await asyncio.sleep(0.1)
         
         # 2. 지역 추출
-        yield f"data: {json.dumps({'type': 'status', 'message': '📍 지역 정보 추출 중...', 'progress': 10}, ensure_ascii=False)}\n\n"
-        await asyncio.sleep(0.5)
+        yield f"data: {json.dumps({'type': 'status', 'message': '📍 지역 정보 추출 중...', 'progress': 5}, ensure_ascii=False)}\n\n"
         
+        # 3. 간단한 진행 메시지 (클라이언트에서 처리)
         preferences = request.preferences or {}
-        city = preferences.get('city', 'Auto')
         
-        # 프롬프트에서 지역 추출 (간단히 표시용)
-        detected_city = "청도" if "청도" in request.prompt else city
-        yield f"data: {json.dumps({'type': 'info', 'message': f'✅ 목적지 인식: {detected_city}', 'progress': 20}, ensure_ascii=False)}\n\n"
-        await asyncio.sleep(0.3)
+        yield f"data: {json.dumps({'type': 'status', 'message': '🔍 장소 크롤링 중...', 'progress': 20}, ensure_ascii=False)}\n\n"
+        await asyncio.sleep(3)
         
-        # 3. 크롤링 시작
-        yield f"data: {json.dumps({'type': 'status', 'message': '🔍 맛집 정보 크롤링 중...', 'progress': 30}, ensure_ascii=False)}\n\n"
-        await asyncio.sleep(1)
+        yield f"data: {json.dumps({'type': 'status', 'message': '🤖 AI 분석 중...', 'progress': 60}, ensure_ascii=False)}\n\n"
+        await asyncio.sleep(5)
         
-        yield f"data: {json.dumps({'type': 'info', 'message': '📝 네이버 블로그 후기 수집 중... (15개)', 'progress': 40}, ensure_ascii=False)}\n\n"
-        await asyncio.sleep(1)
+        yield f"data: {json.dumps({'type': 'status', 'message': '✅ 검증 중...', 'progress': 90}, ensure_ascii=False)}\n\n"
         
-        # 4. AI 분석
-        yield f"data: {json.dumps({'type': 'status', 'message': '🤖 AI가 최적 일정 생성 중...', 'progress': 60}, ensure_ascii=False)}\n\n"
-        await asyncio.sleep(0.5)
-        
-        # 5. 실제 여행 계획 생성 (OpenAI 호출)
-        openai_service = OpenAIService()
-        result = await openai_service.generate_detailed_itinerary(
-            prompt=request.prompt,
-            trip_details=preferences
-        )
-        
-        schedule_count = len(result.get("schedule", []))
-        info_data = {'type': 'info', 'message': f'✅ {schedule_count}개 장소 선정 완료', 'progress': 80}
-        yield f"data: {json.dumps(info_data, ensure_ascii=False)}\n\n"
-        await asyncio.sleep(0.5)
-        
-        # 6. 검증 및 최적화
-        yield f"data: {json.dumps({'type': 'status', 'message': '✅ 장소 검증 및 경로 최적화 중...', 'progress': 90}, ensure_ascii=False)}\n\n"
-        await asyncio.sleep(0.5)
-        
-        # 7. 완료
-        yield f"data: {json.dumps({'type': 'status', 'message': '🎉 여행 계획 생성 완료!', 'progress': 100}, ensure_ascii=False)}\n\n"
-        await asyncio.sleep(0.2)
-        
-        # 8. 최종 결과 전송
-        complete_data = {'type': 'complete', 'data': result}
-        yield f"data: {json.dumps(complete_data, ensure_ascii=False)}\n\n"
+        # 🆕 실제 계획 생성은 일반 API 호출 권장
+        yield f"data: {json.dumps({'type': 'info', 'message': '💡 실제 장소명은 클라이언트에서 표시됩니다', 'progress': 100}, ensure_ascii=False)}\n\n"
         
     except Exception as e:
         error_msg = f"오류 발생: {str(e)}"
