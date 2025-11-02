@@ -103,6 +103,17 @@ async def serve_frontend():
         return FileResponse(frontend_file)
     return {"message": "🇰🇷 스마트 한국 여행 플래너 API", "docs": "/docs"}
 
+# 🆕 404 페이지 핸들러 (login.html, register.html 등 삭제된 페이지)
+@app.get("/login.html")
+@app.get("/register.html")
+@app.get("/history.html")
+async def serve_404_pages():
+    """삭제된 페이지 접근 시 안내 페이지 표시"""
+    notfound_file = os.path.join(get_frontend_path(), "404.html")
+    if os.path.exists(notfound_file):
+        return FileResponse(notfound_file)
+    return {"message": "이 페이지는 제거되었습니다. 메인 페이지(/)로 이동하세요. 로그인 없이 바로 사용 가능합니다."}
+
 # Chrome DevTools 404 에러 방지
 @app.get("/.well-known/appspecific/com.chrome.devtools.json")
 async def chrome_devtools():
