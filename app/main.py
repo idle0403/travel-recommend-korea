@@ -19,7 +19,8 @@ except ImportError:
     pass
 
 from app.api.endpoints import router as api_router
-from app.api.user_endpoints import router as user_router
+from app.api.streaming_endpoints import router as streaming_router  # 🆕 SSE
+# from app.api.user_endpoints import router as user_router  # 로그인 제거로 비활성화
 
 # FastAPI 앱 생성
 app = FastAPI(
@@ -41,7 +42,8 @@ app.add_middleware(
 
 # API 라우터 등록
 app.include_router(api_router, prefix="/api/travel", tags=["travel"])
-app.include_router(user_router, prefix="/api/users", tags=["users"])
+# app.include_router(user_router, prefix="/api/users", tags=["users"])  # 로그인 제거
+app.include_router(streaming_router, prefix="/api/travel", tags=["streaming"])  # 🆕 SSE
 
 def get_frontend_path():
     return os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")

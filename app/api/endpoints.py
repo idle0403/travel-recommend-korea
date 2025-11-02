@@ -354,11 +354,16 @@ async def create_travel_plan(
         print(f"✅ 8단계 아키텍처 응답 생성 완료: {len(itinerary_dicts)}개 항목")
         return response
         
+    except ValueError as ve:
+        # 🆕 장소 0개 등 사용자 에러는 400으로 반환 (명확한 메시지)
+        print(f"User error in create_travel_plan: {str(ve)}")
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
+        # 시스템 에러는 500
         import traceback
-        print(f"Error in create_travel_plan: {str(e)}")
+        print(f"System error in create_travel_plan: {str(e)}")
         print(f"Traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"계획 생성 중 오류 발생: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"계획 생성 중 시스템 오류: {str(e)}")
 
 @router.get("/health")
 async def health_check():

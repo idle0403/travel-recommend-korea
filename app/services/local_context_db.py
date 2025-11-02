@@ -3,13 +3,25 @@
 
 각 지역의 특성, 타겟층, 가격대, 인기 시간대 등
 세밀한 컨텍스트 정보를 제공합니다.
+
+🆕 동적 확장: DB에 없는 지역은 실시간으로 정보 수집하여 자동 생성
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+import asyncio
 
 
 class LocalContextDB:
-    """지역별 특화 정보 데이터베이스"""
+    """지역별 특화 정보 데이터베이스 (정적 + 동적)"""
+    
+    # 동적 컨텍스트 캐시 (런타임에 생성된 지역 정보)
+    # 메모리 기반 캐시로 30일간 보관
+    DYNAMIC_CONTEXT_CACHE: Dict[str, Dict[str, Any]] = {}
+    
+    def __init__(self):
+        """캐시 만료 시간 설정"""
+        from datetime import timedelta
+        self.cache_duration = timedelta(days=30)
     
     # 지역 특성 데이터베이스
     CONTEXT_DB = {
@@ -252,15 +264,90 @@ class LocalContextDB:
     
     def get_context(self, location: str) -> Dict[str, Any]:
         """
-        지역 컨텍스트 조회
+        지역 컨텍스트 조회 (정적 DB → 동적 캐시 순서)
         
         Args:
-            location: 지역명 (예: '마곡동', '역삼동')
+            location: 지역명 (예: '마곡동', '역삼동', '청도')
         
         Returns:
             지역 특성 정보 딕셔너리
         """
-        return self.CONTEXT_DB.get(location, {})
+        # 1. 정적 DB에서 먼저 조회
+        static_context = self.CONTEXT_DB.get(location)
+        if static_context:
+            print(f"   ✅ 정적 DB에서 {location} 컨텍스트 발견")
+            return static_context
+        
+        # 2. 동적 캐시에서 조회
+        dynamic_context = self.DYNAMIC_CONTEXT_CACHE.get(location)
+        if dynamic_context:
+            print(f"   ✅ 동적 캐시에서 {location} 컨텍스트 발견")
+            return dynamic_context
+        
+        # 3. 없으면 빈 딕셔너리 반환 (호출자가 동적 생성 트리거)
+        print(f"   ℹ️ {location} 컨텍스트 미발견 → 동적 생성 필요")
+        return {}
+    
+    async def get_or_create_context(self, location: str) -> Dict[str, Any]:
+        """
+        지역 컨텍스트 조회 또는 동적 생성 (비동기)
+        
+        Args:
+            location: 지역명
+        
+        Returns:
+            지역 컨텍스트 (없으면 동적 생성)
+        """
+        # 기존 컨텍스트 확인
+        existing_context = self.get_context(location)
+        if existing_context:
+            # 캐시 만료 확인 (동적 생성된 경우만)
+            if existing_context.get('cache_until'):
+                from datetime import datetime
+                cache_until = datetime.fromisoformat(existing_context['cache_until'])
+                if datetime.now() > cache_until:
+                    print(f"   ⏰ {location} 캐시 만료 → 재생성")
+                    # 캐시 삭제
+                    if location in self.DYNAMIC_CONTEXT_CACHE:
+                        del self.DYNAMIC_CONTEXT_CACHE[location]
+                else:
+                    return existing_context
+            else:
+                # 정적 DB 데이터는 만료 없음
+                return existing_context
+        
+        # 동적 생성
+        print(f"\n🔄 {location} 동적 컨텍스트 생성 시작...")
+        from app.services.dynamic_location_context_service import DynamicLocationContextService
+        
+        dynamic_service = DynamicLocationContextService()
+        new_context = await dynamic_service.generate_location_context(location)
+        
+        # 캐시에 저장
+        self.DYNAMIC_CONTEXT_CACHE[location] = new_context
+        print(f"✅ {location} 동적 컨텍스트 생성 및 캐시 저장 완료 (30일 보관)")
+        
+        return new_context
+    
+    def cleanup_expired_cache(self):
+        """만료된 동적 컨텍스트 정리"""
+        from datetime import datetime
+        
+        expired_locations = []
+        current_time = datetime.now()
+        
+        for location, context in self.DYNAMIC_CONTEXT_CACHE.items():
+            cache_until_str = context.get('cache_until')
+            if cache_until_str:
+                cache_until = datetime.fromisoformat(cache_until_str)
+                if current_time > cache_until:
+                    expired_locations.append(location)
+        
+        for location in expired_locations:
+            del self.DYNAMIC_CONTEXT_CACHE[location]
+            print(f"🗑️ 만료된 캐시 삭제: {location}")
+        
+        return len(expired_locations)
     
     def enrich_search_with_context(
         self,

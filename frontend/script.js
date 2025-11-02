@@ -194,25 +194,72 @@ async function handleFormSubmit() {
     console.log('Starting API call...');
     showLoading();
     
-    try {
-        const requestData = {
-            prompt: `${city}에서 ${travelStyleText} ${durationText} ${startDate.replace(/-/g, '')} ${startTime.replace(':', '')}부터 ${endDate.replace(/-/g, '')} ${endTime.replace(':', '')}까지 ${startLocation ? `출발지: ${startLocation}에서 시작하여 ` : ''}${prompt}`,
-            preferences: {
-                city,
-                travel_style: travelStyle,
-                start_date: startDate,
-                end_date: endDate,
-                start_time: startTime,
-                end_time: endTime,
-                start_location: startLocation,
-                duration_days: diffDays,
-                duration_hours: diffHours
+    const requestData = {
+        prompt: `${city}에서 ${travelStyleText} ${durationText} ${startDate.replace(/-/g, '')} ${startTime.replace(':', '')}부터 ${endDate.replace(/-/g, '')} ${endTime.replace(':', '')}까지 ${startLocation ? `출발지: ${startLocation}에서 시작하여 ` : ''}${prompt}`,
+        preferences: {
+            city,
+            travel_style: travelStyle,
+            start_date: startDate,
+            end_date: endDate,
+            start_time: startTime,
+            end_time: endTime,
+            start_location: startLocation,
+            duration_days: diffDays,
+            duration_hours: diffHours
+        }
+    };
+    
+    // 🆕 SSE 스트리밍 사용 여부 체크 (기본값: 일반 API)
+    const useStreaming = false;  // TODO: UI에서 선택 가능하게
+    
+    if (useStreaming) {
+        // SSE 스트리밍 방식
+        await handleFormSubmitWithSSE(requestData);
+    } else {
+        // 기존 방식
+        try {
+            console.log('Request data:', requestData);
+            
+            const response = await fetch(`${API_BASE_URL}/api/travel/plan`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestData)
+            });
+            
+            console.log('Response status:', response.status);
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('API Error:', errorText);
+                throw new Error(`서버 오류 (${response.status}): ${errorText}`);
             }
-        };
-        
-        console.log('Request data:', requestData);
-        
-        const response = await fetch(`${API_BASE_URL}/api/travel/plan`, {
+            
+            const data = await response.json();
+            console.log('API Response data:', data);
+            
+            await displayResults(data);
+            showToast('여행 계획이 생성되었습니다!', 'success');
+            
+        } catch (error) {
+            console.error('Error:', error);
+            showToast('오류가 발생했습니다: ' + (error.message || '알 수 없는 오류'), 'error');
+            hideLoading();
+        }
+    }
+}
+
+// 🆕 SSE 스트리밍 방식으로 여행 계획 생성
+async function handleFormSubmitWithSSE(requestData) {
+    const progressLog = document.getElementById('progressLog');
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+    
+    progressLog.innerHTML = '';
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/travel/plan-stream`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -220,23 +267,55 @@ async function handleFormSubmit() {
             body: JSON.stringify(requestData)
         });
         
-        console.log('Response status:', response.status);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
         
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('API Error:', errorText);
-            throw new Error(`서버 오류 (${response.status}): ${errorText}`);
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value);
+            const lines = chunk.split('\n');
+            
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const jsonStr = line.substring(6);
+                    try {
+                        const data = JSON.parse(jsonStr);
+                        
+                        if (data.type === 'status' || data.type === 'info') {
+                            // 로그 추가
+                            const logItem = document.createElement('div');
+                            logItem.className = data.type === 'status' ? 'text-blue-700' : 'text-green-600';
+                            logItem.innerHTML = `<i class="fas fa-check-circle mr-2"></i>${data.message}`;
+                            progressLog.appendChild(logItem);
+                            progressLog.scrollTop = progressLog.scrollHeight;
+                            
+                            // 진행률 업데이트
+                            if (data.progress) {
+                                progressBar.style.width = data.progress + '%';
+                                progressText.textContent = data.progress + '%';
+                            }
+                        } else if (data.type === 'complete') {
+                            // 완료
+                            await displayResults(data.data);
+                            showToast('여행 계획이 생성되었습니다!', 'success');
+                        } else if (data.type === 'error') {
+                            throw new Error(data.message);
+                        }
+                    } catch (e) {
+                        if (e.message) {
+                            throw e;
+                        }
+                        console.log('JSON 파싱 무시:', jsonStr);
+                    }
+                }
+            }
         }
         
-        const data = await response.json();
-        console.log('API Response data:', data);
-        
-        await displayResults(data);
-        showToast('여행 계획이 생성되었습니다!', 'success');
-        
     } catch (error) {
-        console.error('Error:', error);
-        showToast('오류가 발생했습니다: ' + (error.message || '알 수 없는 오류'), 'error');
+        console.error('SSE Error:', error);
+        showToast('오류가 발생했습니다: ' + error.message, 'error');
         hideLoading();
     }
 }
@@ -246,6 +325,21 @@ function showLoading() {
     document.getElementById('results').classList.add('hidden');
     document.getElementById('submitBtn').disabled = true;
     document.getElementById('btnText').textContent = '생성 중...';
+    
+    // 🆕 진행률 초기화
+    const progressLog = document.getElementById('progressLog');
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+    
+    if (progressLog) {
+        progressLog.innerHTML = '<div class="text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i>준비 중...</div>';
+    }
+    if (progressBar) {
+        progressBar.style.width = '0%';
+    }
+    if (progressText) {
+        progressText.textContent = '0%';
+    }
 }
 
 function hideLoading() {
@@ -277,6 +371,9 @@ async function displayResults(data) {
         displayRoute(places);
     }
     
+    // 🆕 localStorage에 여행 계획 저장
+    saveTravelPlanToLocal(data);
+    
     // Show Notion saving status
     updateNotionStatus('saving');
     
@@ -285,6 +382,183 @@ async function displayResults(data) {
         const url = data.notion_url || 'https://notion.so/sample-page';
         updateNotionStatus('success', url);
     }, NOTION_SAVE_DELAY);
+}
+
+// 🆕 localStorage 히스토리 관리 함수
+function saveTravelPlanToLocal(planData) {
+    try {
+        const history = JSON.parse(localStorage.getItem('travel_history') || '[]');
+        
+        const newPlan = {
+            id: Date.now(),
+            title: planData.title || '여행 계획',
+            summary: planData.summary || '',
+            city: document.getElementById('city').value,
+            prompt: document.getElementById('prompt').value,
+            itinerary: planData.itinerary || [],
+            created_at: new Date().toISOString(),
+            start_date: document.getElementById('startDate').value,
+            end_date: document.getElementById('endDate').value
+        };
+        
+        // 최신 순으로 앞에 추가
+        history.unshift(newPlan);
+        
+        // 최대 50개까지만 저장
+        if (history.length > 50) {
+            history.splice(50);
+        }
+        
+        localStorage.setItem('travel_history', JSON.stringify(history));
+        updateHistoryCount();
+        
+        console.log('✅ 여행 계획 로컬 저장 완료:', newPlan.id);
+    } catch (error) {
+        console.error('❌ localStorage 저장 오류:', error);
+    }
+}
+
+function updateHistoryCount() {
+    try {
+        const history = JSON.parse(localStorage.getItem('travel_history') || '[]');
+        const countEl = document.getElementById('historyCount');
+        if (countEl) {
+            countEl.textContent = history.length;
+        }
+    } catch (error) {
+        console.error('히스토리 카운트 업데이트 오류:', error);
+    }
+}
+
+function showHistory() {
+    try {
+        const history = JSON.parse(localStorage.getItem('travel_history') || '[]');
+        
+        if (history.length === 0) {
+            showToast('저장된 여행 기록이 없습니다', 'info');
+            return;
+        }
+        
+        // 모달 생성
+        const modal = document.createElement('div');
+        modal.id = 'historyModal';
+        modal.className = 'fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4';
+        modal.innerHTML = `
+            <div class="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+                <div class="flex justify-between items-center p-6 border-b">
+                    <h3 class="text-2xl font-bold text-gray-800">
+                        <i class="fas fa-history text-blue-500 mr-2"></i>
+                        내 여행 기록 (${history.length}개)
+                    </h3>
+                    <button onclick="closeHistoryModal()" class="text-gray-400 hover:text-gray-600 p-2">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+                <div class="flex-1 overflow-y-auto p-6">
+                    ${history.map((plan, index) => `
+                        <div class="border rounded-lg p-4 mb-4 hover:shadow-md transition cursor-pointer" onclick="loadHistoryPlan(${plan.id})">
+                            <div class="flex justify-between items-start mb-2">
+                                <div class="flex-1">
+                                    <h4 class="font-bold text-lg text-gray-800">${plan.title}</h4>
+                                    <p class="text-sm text-gray-600 mt-1">${plan.prompt || ''}</p>
+                                </div>
+                                <button onclick="event.stopPropagation(); deleteHistoryPlan(${plan.id})" 
+                                        class="text-red-500 hover:text-red-700 p-2">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                            <div class="flex items-center space-x-4 text-xs text-gray-500">
+                                <span><i class="fas fa-map-marker-alt"></i> ${plan.city || 'Auto'}</span>
+                                <span><i class="fas fa-calendar"></i> ${plan.start_date} ~ ${plan.end_date}</span>
+                                <span><i class="fas fa-list"></i> ${plan.itinerary ? plan.itinerary.length : 0}개 장소</span>
+                                <span><i class="fas fa-clock"></i> ${new Date(plan.created_at).toLocaleDateString('ko-KR')}</span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+    } catch (error) {
+        console.error('히스토리 표시 오류:', error);
+        showToast('히스토리를 불러올 수 없습니다', 'error');
+    }
+}
+
+function closeHistoryModal() {
+    const modal = document.getElementById('historyModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+function loadHistoryPlan(planId) {
+    try {
+        const history = JSON.parse(localStorage.getItem('travel_history') || '[]');
+        const plan = history.find(p => p.id === planId);
+        
+        if (plan) {
+            // 폼에 데이터 로드
+            document.getElementById('city').value = plan.city || 'Auto';
+            document.getElementById('prompt').value = plan.prompt || '';
+            document.getElementById('startDate').value = plan.start_date || '';
+            document.getElementById('endDate').value = plan.end_date || '';
+            
+            // 결과 표시
+            displayResults({
+                title: plan.title,
+                summary: plan.summary,
+                itinerary: plan.itinerary,
+                plan_id: plan.id,
+                created_at: plan.created_at
+            });
+            
+            closeHistoryModal();
+            showToast('여행 계획을 불러왔습니다', 'success');
+        }
+    } catch (error) {
+        console.error('계획 로드 오류:', error);
+        showToast('계획을 불러올 수 없습니다', 'error');
+    }
+}
+
+function deleteHistoryPlan(planId) {
+    if (!confirm('이 여행 계획을 삭제하시겠습니까?')) {
+        return;
+    }
+    
+    try {
+        const history = JSON.parse(localStorage.getItem('travel_history') || '[]');
+        const filtered = history.filter(p => p.id !== planId);
+        
+        localStorage.setItem('travel_history', JSON.stringify(filtered));
+        updateHistoryCount();
+        
+        // 모달 닫고 다시 열기
+        closeHistoryModal();
+        setTimeout(() => showHistory(), 100);
+        
+        showToast('여행 계획이 삭제되었습니다', 'success');
+    } catch (error) {
+        console.error('삭제 오류:', error);
+        showToast('삭제에 실패했습니다', 'error');
+    }
+}
+
+function clearHistory() {
+    if (!confirm('모든 여행 기록을 삭제하시겠습니까?')) {
+        return;
+    }
+    
+    try {
+        localStorage.removeItem('travel_history');
+        updateHistoryCount();
+        showToast('모든 여행 기록이 삭제되었습니다', 'success');
+    } catch (error) {
+        console.error('전체 삭제 오류:', error);
+        showToast('삭제에 실패했습니다', 'error');
+    }
 }
 
 // 전역 변수
@@ -2149,21 +2423,10 @@ function getCityCenter() {
     return cityCenters[selectedCity] || SEOUL_CENTER;
 }
 
-// 사용자 인증 상태 확인
+// 🆕 히스토리 카운트 초기화
 function checkAuthStatus() {
-    const token = localStorage.getItem('access_token');
-    if (token) {
-        // 로그인 상태
-        document.getElementById('authButtons').classList.add('hidden');
-        document.getElementById('userInfo').classList.remove('hidden');
-        document.getElementById('userName').textContent = '사용자';
-        
-        // 로그아웃 이벤트
-        document.getElementById('logoutBtn').onclick = function() {
-            localStorage.removeItem('access_token');
-            location.reload();
-        };
-    }
+    // 로그인 시스템 제거됨, 히스토리 카운트만 업데이트
+    updateHistoryCount();
 }
 
 // 날씨 정보 표시
@@ -2365,48 +2628,11 @@ function displayMarkersOnly(itinerary) {
     console.log(`Displayed ${itinerary.length} markers on map`);
 }
 
-// 여행 계획 저장 기능
+// 저장 기능 (🆕 로그인 제거)
 function setupSaveFeatures() {
-    // 내 여행 계획에 저장
-    document.getElementById('savePlanBtn').onclick = async function() {
-        if (!currentTravelPlan) {
-            alert('저장할 여행 계획이 없습니다.');
-            return;
-        }
-        
-        const token = localStorage.getItem('access_token');
-        if (!token) {
-            alert('로그인이 필요합니다.');
-            window.location.href = 'login.html';
-            return;
-        }
-        
-        try {
-            const response = await fetch('/api/users/travel-plans', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    title: currentTravelPlan.title,
-                    city: currentTravelPlan.preferences?.city || 'Seoul',
-                    itinerary_json: JSON.stringify(currentTravelPlan.itinerary),
-                    total_cost: currentTravelPlan.total_cost?.amount || 0
-                })
-            });
-            
-            if (response.ok) {
-                showSaveResult('내 여행 계획에 저장되었습니다!', 'success');
-            } else {
-                showSaveResult('저장에 실패했습니다.', 'error');
-            }
-        } catch (error) {
-            showSaveResult('오류: ' + error.message, 'error');
-        }
-    };
+    // 🆕 savePlanBtn 제거됨 (자동 저장으로 대체)
     
-    // Notion에 저장
+    // Notion에 저장 (선택적)
     document.getElementById('saveNotionBtn').onclick = async function() {
         if (!currentTravelPlan) {
             alert('저장할 여행 계획이 없습니다.');

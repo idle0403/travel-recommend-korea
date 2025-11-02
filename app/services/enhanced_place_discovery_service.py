@@ -9,6 +9,12 @@ from app.services.google_maps_service import GoogleMapsService
 from app.services.blog_crawler_service import BlogCrawlerService
 from app.services.weather_service import WeatherService
 from app.services.crawl_cache_service import CrawlCacheService
+# 🆕 Redis 캐시 우선 사용, 없으면 메모리 캐시 폴백
+try:
+    from app.services.redis_cache_service import RedisCacheService
+    USE_REDIS = True
+except ImportError:
+    USE_REDIS = False
 from app.services.city_service import CityService
 from app.services.district_service import DistrictService
 
@@ -24,7 +30,15 @@ class EnhancedPlaceDiscoveryService:
         self.google_service = GoogleMapsService()
         self.blog_crawler = BlogCrawlerService()
         self.weather_service = WeatherService()
-        self.cache_service = CrawlCacheService()
+        
+        # 🆕 Redis 우선 사용, 없으면 메모리 캐시
+        if USE_REDIS:
+            self.cache_service = RedisCacheService()
+            print("🎯 Redis 캐시 서비스 사용")
+        else:
+            self.cache_service = CrawlCacheService()
+            print("📦 메모리 캐시 서비스 사용 (폴백)")
+        
         self.city_service = CityService()
         self.district_service = DistrictService()
         
@@ -48,29 +62,52 @@ class EnhancedPlaceDiscoveryService:
         print(f"🚀 향상된 장소 발견 시작")
         print(f"{'='*80}")
         
-        # 🆕 Step 0: 계층적 지역 정보 추출
+        # 🆕 Step 0: 계층적 지역 정보 추출 (비동기)
         print(f"\n📍 [Step 0] 계층적 지역 정보 추출")
-        location_hierarchy = self.location_extractor.extract_location_hierarchy(prompt)
+        location_hierarchy = await self.location_extractor.extract_location_hierarchy(prompt)
         
-        # 🆕 Step 0.5: 지역 맥락 정보 조회
-        print(f"\n🏙️ [Step 0.5] 지역 맥락 DB 조회")
+        # 🆕 Step 0.1: city 파라미터 오버라이드 (Auto인 경우)
+        if city == "Auto" or not city:
+            extracted_city = location_hierarchy.get('city')
+            if extracted_city:
+                print(f"   🔄 city 파라미터 오버라이드: '{city}' → '{extracted_city}'")
+                city = extracted_city
+                # location_hierarchy는 이미 올바른 좌표를 가지고 있음 (AI 학습 완료)
+        
+        # 🆕 Step 0.5: 지역 맥락 정보 조회 (정적 DB + 동적 생성)
+        print(f"\n🏙️ [Step 0.5] 지역 맥락 DB 조회 또는 생성")
         local_context = {}
-        if location_hierarchy.get('neighborhood'):
-            local_context = self.local_context_db.enrich_search_with_context(
-                location=location_hierarchy['neighborhood'],
-                user_request=prompt,
-                time_context=location_hierarchy.get('context', {}).get('시간대', []),
-                target_context=location_hierarchy.get('context', {}).get('타겟', [])
-            )
+        
+        # 우선순위: neighborhood > district > city
+        target_location = location_hierarchy.get('neighborhood') or \
+                         location_hierarchy.get('district') or \
+                         location_hierarchy.get('city')
+        
+        if target_location:
+            print(f"   🔍 타겟 지역: {target_location}")
             
-            if local_context.get('enriched'):
-                print(f"   ✅ 지역 특성 매칭: {location_hierarchy['neighborhood']}")
-                print(f"   특성: {', '.join(local_context.get('location_characteristics', [])[:3])}")
-                print(f"   추천 음식: {', '.join(local_context.get('recommended_cuisines', [])[:3])}")
-                print(f"   가격대: {local_context.get('target_price_range')}")
-                print(f"   분위기: {local_context.get('atmosphere')}")
+            # 동적 컨텍스트 조회/생성 (비동기)
+            location_context = await self.local_context_db.get_or_create_context(target_location)
+            
+            if location_context:
+                # enrich_search_with_context 호출
+                local_context = self.local_context_db.enrich_search_with_context(
+                    location=target_location,
+                    user_request=prompt,
+                    time_context=location_hierarchy.get('context', {}).get('시간대', []),
+                    target_context=location_hierarchy.get('context', {}).get('타겟', [])
+                )
+                
+                if local_context.get('enriched'):
+                    print(f"   ✅ 지역 특성 매칭: {target_location}")
+                    print(f"   특성: {', '.join(local_context.get('location_characteristics', [])[:3])}")
+                    print(f"   추천 음식: {', '.join(local_context.get('recommended_cuisines', [])[:3])}")
+                    print(f"   가격대: {local_context.get('target_price_range')}")
+                    print(f"   분위기: {local_context.get('atmosphere')}")
+                else:
+                    print(f"   ℹ️ {target_location} 맥락 정보 사용 불가 (일반 검색)")
             else:
-                print(f"   ℹ️ {location_hierarchy['neighborhood']} 맥락 정보 없음 (일반 검색)")
+                print(f"   ⚠️ {target_location} 맥락 생성 실패 (일반 검색)")
         
         # 1. 프롬프트 분석 및 키워드 추출
         print(f"\n🔑 [Step 1] 키워드 추출")
@@ -93,6 +130,26 @@ class EnhancedPlaceDiscoveryService:
         search_queries = self.query_builder.build_search_queries(location_hierarchy, keywords)
         primary_queries = self.query_builder.get_primary_queries(search_queries, top_n=5)
         
+        # 🆕 Step 1.8: 여행 일수에 따른 필요 장소 수 계산
+        days_count = len(travel_dates) if travel_dates else 1
+        if days_count == 1:
+            # 당일치기: 시간당 1-2개 × 8시간 = 8-16개
+            required_places = 16
+            places_per_keyword = 10
+        elif days_count == 2:
+            # 1박2일: 하루 8개 × 2일 = 16개 + 여유분 = 30개
+            required_places = 30
+            places_per_keyword = 15
+        elif days_count >= 3:
+            # 2박3일 이상: 하루 8개 × 일수 + 50% 여유
+            required_places = days_count * 8 * 1.5
+            places_per_keyword = 20
+        else:
+            required_places = 16
+            places_per_keyword = 10
+        
+        print(f"\n📊 여행 일수: {days_count}일, 필요 장소: {required_places}개 (키워드당 {places_per_keyword}개)")
+        
         # 2. 날씨 정보 조회 (지정된 일자)
         print(f"\n🌦️ [Step 2] 날씨 정보 조회")
         weather_data = await self._get_weather_for_dates(city, travel_dates)
@@ -101,7 +158,7 @@ class EnhancedPlaceDiscoveryService:
         print(f"\n💾 [Step 3] 장소 데이터 수집 (캐시 + 크롤링)")
         all_places = []
         
-        # 기존 키워드 기반 검색
+        # 기존 키워드 기반 검색 (🆕 장기 여행은 더 많이 크롤링)
         for keyword in keywords:
             search_key = self.cache_service.generate_search_key(city, keyword)
             
@@ -110,14 +167,15 @@ class EnhancedPlaceDiscoveryService:
                 print(f"   ✅ 캐시 사용: {search_key} ({len(cached_places)}개)")
                 all_places.extend(cached_places)
             else:
-                print(f"   🔍 새 크롤링: {search_key}")
-                new_places = await self._crawl_places_by_keyword(city, keyword)
+                print(f"   🔍 새 크롤링: {search_key} (요청: {places_per_keyword}개)")
+                new_places = await self._crawl_places_by_keyword(city, keyword, display=places_per_keyword)
                 if new_places:
                     self.cache_service.save_crawled_data(search_key, new_places)
                     all_places.extend(new_places)
         
-        # 🆕 정밀 검색 쿼리 기반 추가 검색
-        for query_info in search_queries[:3]:  # 상위 3개만
+        # 🆕 정밀 검색 쿼리 기반 추가 검색 (🆕 장기 여행은 더 많이)
+        query_count = 5 if days_count >= 2 else 3  # 1박2일 이상이면 쿼리 더 많이
+        for query_info in search_queries[:query_count]:
             query = query_info['query']
             search_key = self.cache_service.generate_search_key("", query)
             
@@ -126,8 +184,8 @@ class EnhancedPlaceDiscoveryService:
                 print(f"   ✅ 캐시 사용 (정밀): {query} ({len(cached_places)}개)")
                 all_places.extend(cached_places)
             else:
-                print(f"   🔍 새 크롤링 (정밀): {query}")
-                new_places = await self._crawl_places_by_precise_query(query)
+                print(f"   🔍 새 크롤링 (정밀): {query} (요청: {places_per_keyword}개)")
+                new_places = await self._crawl_places_by_precise_query(query, display=places_per_keyword)
                 if new_places:
                     self.cache_service.save_crawled_data(search_key, new_places)
                     all_places.extend(new_places)
@@ -160,6 +218,23 @@ class EnhancedPlaceDiscoveryService:
         )
         
         print(f"   ✅ 지리적 필터링 완료: {len(geo_filtered_places)}개")
+        
+        # 🆕 장소가 0개면 명확한 에러 메시지 반환 (디폴트 값 대신)
+        if len(geo_filtered_places) == 0:
+            requested_region = location_hierarchy.get('city', 'N/A')
+            if location_hierarchy.get('district'):
+                requested_region += f" {location_hierarchy.get('district')}"
+            
+            error_msg = f"해당 지역('{requested_region}')에서 적합한 장소를 찾을 수 없습니다. "
+            error_msg += f"총 {len(all_places)}개 장소를 수집했으나 지리적 필터링 후 0개가 남았습니다. "
+            
+            if location_hierarchy.get('district'):
+                error_msg += f"'{location_hierarchy.get('city')}' 전체로 검색을 넓혀보시거나, "
+            
+            error_msg += "다른 키워드를 시도해보세요."
+            
+            print(f"\n❌ 에러: {error_msg}")
+            raise ValueError(error_msg)
         
         # 4. AI 분석 및 추천 (날씨 고려)
         print(f"\n🤖 [Step 4] AI 분석 및 추천")
@@ -210,12 +285,12 @@ class EnhancedPlaceDiscoveryService:
         
         return weather_data
     
-    async def _crawl_places_by_keyword(self, city: str, keyword: str) -> List[Dict[str, Any]]:
+    async def _crawl_places_by_keyword(self, city: str, keyword: str, display: int = 15) -> List[Dict[str, Any]]:
         """키워드별 장소 크롤링"""
         search_query = f"{city} {keyword}"
         
-        # 네이버 검색
-        naver_places = await self.naver_service.search_places(search_query, display=15)
+        # 네이버 검색 (🆕 display 파라미터 사용)
+        naver_places = await self.naver_service.search_places(search_query, display=display)
         
         enhanced_places = []
         for place in naver_places:
@@ -414,18 +489,19 @@ class EnhancedPlaceDiscoveryService:
                 stats["new_crawl"] += 1
         return stats
     
-    async def _crawl_places_by_precise_query(self, query: str) -> List[Dict[str, Any]]:
+    async def _crawl_places_by_precise_query(self, query: str, display: int = 15) -> List[Dict[str, Any]]:
         """
         🆕 정밀 검색 쿼리로 장소 크롤링
         
         Args:
             query: 정밀 검색 쿼리 (예: "서울 강서구 마곡동 맛집")
+            display: 검색 결과 수 (🆕 장기 여행은 더 많이)
         
         Returns:
             장소 리스트
         """
         # 네이버 검색
-        naver_places = await self.naver_service.search_places(query, display=10)
+        naver_places = await self.naver_service.search_places(query, display=display)
         
         enhanced_places = []
         for place in naver_places:

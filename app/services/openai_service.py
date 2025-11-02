@@ -157,6 +157,34 @@ class OpenAIService:
         context_atmosphere = local_context.get('atmosphere', '') if local_context.get('enriched') else ''
         context_best_for = ', '.join(local_context.get('best_for', [])[:2]) if local_context.get('enriched') else ''
         
+        # 🆕 여행 기간 계산 (system_prompt보다 먼저 계산!)
+        start_date_val = trip_details.get('start_date') if trip_details else None
+        end_date_val = trip_details.get('end_date') if trip_details else None
+        
+        if start_date_val and end_date_val:
+            from datetime import datetime
+            try:
+                start_dt = datetime.strptime(start_date_val, '%Y-%m-%d')
+                end_dt = datetime.strptime(end_date_val, '%Y-%m-%d')
+                days_count = (end_dt - start_dt).days + 1
+            except:
+                days_count = 1
+        else:
+            # 프롬프트에서 일수 추출 시도
+            prompt_lower = prompt.lower()
+            if '당일치기' in prompt or '하루' in prompt:
+                days_count = 1
+            elif '1박2일' in prompt or '하룻밤' in prompt:
+                days_count = 2
+            elif '2박3일' in prompt or '이틀밤' in prompt:
+                days_count = 3
+            elif '3박4일' in prompt or '사틀밤' in prompt:
+                days_count = 4
+            else:
+                days_count = 1
+        
+        print(f"📅 여행 기간: {days_count}일")
+        
         # 🆕 지리적 제약 텍스트 생성
         geographic_constraint = ""
         if requested_neighborhood:
@@ -221,13 +249,15 @@ class OpenAIService:
 **절대 규칙: 위 검증된 장소들만 사용하세요. 가상의 장소 절대 금지!**
 
 **응답 규칙:**
-- 각 장소는 고유해야 함 (중복 절대 금지)
+- 🚨 **각 장소는 전체 {days_count}일 일정에서 단 1번만 등장** (중복 절대 금지)
+- 🚨 **1일차와 2일차는 완전히 다른 장소**들로 구성 (같은 장소 재방문 금지)
 - 실제 존재하는 장소만 포함
 - 불확실한 경우 "verified": false로 표시
 - 날씨에 맞는 실내/실외 활동 우선 선택
 - **이동 거리 제한**: 연속된 장소 간 대중교통 이동시간 20분 이내로 제한
 - **도시 제한 강화**: {city} 내 장소만 추천 (예: 대구 요청시 대구광역시 내 장소만)
 - **지역 검증**: 모든 추천 장소가 {city}에 실제 위치하는지 재확인
+- **일자별 체크**: 일정 생성 후 1일차와 2일차에 중복된 장소가 있는지 반드시 확인하고 제거
 
 응답 형식:
 {{
@@ -268,31 +298,7 @@ class OpenAIService:
         weather_service = WeatherRecommendationService()
         weather_recommendations = weather_service.get_weather_based_recommendations(weather_data, forecast_data)
         
-        # 여행 기간 계산
-        start_date = trip_details.get('start_date') if trip_details else None
-        end_date = trip_details.get('end_date') if trip_details else None
-        
-        if start_date and end_date:
-            from datetime import datetime
-            try:
-                start_dt = datetime.strptime(start_date, '%Y-%m-%d')
-                end_dt = datetime.strptime(end_date, '%Y-%m-%d')
-                days_count = (end_dt - start_dt).days + 1
-            except:
-                days_count = 1
-        else:
-            # 프롬프트에서 일수 추출 시도
-            prompt_lower = prompt.lower()
-            if '당일치기' in prompt or '하루' in prompt:
-                days_count = 1
-            elif '1박2일' in prompt or '하룻밤' in prompt:
-                days_count = 2
-            elif '2박3일' in prompt or '이틀밤' in prompt:
-                days_count = 3
-            elif '3박4일' in prompt or '사틀밤' in prompt:
-                days_count = 4
-            else:
-                days_count = 1
+        # days_count는 이미 위에서 계산됨
         
         user_prompt = f"""
 다음 요청에 대해 **{days_count}일간의 일자별 상세 여행 일정**을 생성해주세요:
@@ -307,8 +313,8 @@ class OpenAIService:
 **UI에서 설정한 여행 정보:**
 - 도시: {city}
 - 여행 스타일: {travel_style}
-- 시작일: {start_date or '오늘'}
-- 종료일: {end_date or '오늘'}
+- 시작일: {start_date_val or '오늘'}
+- 종료일: {end_date_val or '오늘'}
 - 매일 시작 시간: {start_time}
 - 매일 종료 시간: {end_time}
 - 출발지: {start_location or '미설정'}
@@ -321,11 +327,17 @@ class OpenAIService:
 4. **도시 제한 강화**: {city} 내 장소만 추천 (다른 도시 절대 금지)
 5. **출발지 고려**: {start_location or '미설정'}에서 시작하는 동선 구성
 6. **실제 장소만**: 가상 장소 절대 금지, 검증된 장소만 추천
-7. **중복 방지**: 전체 기간 동안 같은 장소 중복 금지
+7. **🚨 중복 절대 금지 (CRITICAL) 🚨**: 
+   - 전체 {days_count}일 여행 기간 동안 같은 장소를 두 번 이상 방문하는 것 절대 금지
+   - 1일차에 방문한 장소는 2일차에 절대 포함하지 않음
+   - 예: 1일차에 "청도한우마을" 방문 → 2일차에 "청도한우마을" 재방문 절대 금지
+   - 각 장소는 전체 일정에서 단 1번만 등장해야 함
+   - 장소명, 주소, 좌표 모두 확인하여 중복 방지
 8. **현실적 동선**: 지역별 클러스터링으로 효율적 이동
 9. **이동시간 제한**: 연속된 장소 간 대중교통/도보 이동시간 20분 이내
 10. **지역 특화**: {city}의 유명한 구/동 지역 내에서만 장소 선택
 11. **지역 검증**: 모든 장소가 {city}에 실제 위치하는지 반드시 확인
+12. **일자별 다양성**: 1일차와 2일차는 완전히 다른 장소들로 구성 (중복 0개)
 
 **응답 형식 (중요):**
 반드시 각 일정에 "day" 필드를 포함하여 {days_count}일간 일정을 생성하세요.
@@ -333,11 +345,12 @@ class OpenAIService:
 예시 ({days_count}일 여행):
 {{
   "schedule": [
+    # 1일차 (4-6개 장소)
     {{
       "day": 1,
-      "date": "{start_date or '2025-01-01'}",
+      "date": "{start_date_val or '2025-01-01'}",
       "time": "09:00",
-      "place_name": "실제 장소명",
+      "place_name": "A 장소",  // 고유한 장소
       "activity": "구체적 활동",
       "address": "정확한 주소",
       "duration": "90분",
@@ -349,13 +362,33 @@ class OpenAIService:
       "lng": 126.9780
     }},
     {{
+      "day": 1,
+      "time": "11:00",
+      "place_name": "B 장소",  // A와 완전히 다른 장소
+      ...
+    }},
+    # 2일차 (4-6개 장소, 1일차와 완전히 다른 장소들)
+    {{
       "day": 2,
-      "date": "2025-01-02",
+      "date": "{end_date_val or '2025-01-02'}",
       "time": "09:00",
+      "place_name": "C 장소",  // A, B와 완전히 다른 새로운 장소
+      ...
+    }},
+    {{
+      "day": 2,
+      "time": "11:00",
+      "place_name": "D 장소",  // A, B, C와 완전히 다른 새로운 장소
       ...
     }}
   ]
 }}
+
+🚨 **중복 체크리스트 (반드시 확인):**
+- [ ] 1일차 장소 목록: [A, B, ...]
+- [ ] 2일차 장소 목록: [C, D, ...]  
+- [ ] 중복 확인: A ≠ C, A ≠ D, B ≠ C, B ≠ D (모두 다름 ✅)
+- [ ] 전체 {days_count}일 일정에 같은 장소가 2번 이상 나오면 응답 거부!
 """
 
         try:
@@ -902,7 +935,7 @@ class OpenAIService:
         return context
     
     async def _enhance_with_8step_data(self, ai_result: Dict[str, Any], discovered_data: Dict[str, Any]) -> Dict[str, Any]:
-        """8단계 처리된 데이터로 AI 결과 향상"""
+        """8단계 처리된 데이터로 AI 결과 향상 + 중복 제거"""
         enhanced_schedule = []
         verified_places = discovered_data.get('verified_places', [])
         
@@ -913,27 +946,59 @@ class OpenAIService:
             print(f"검증된 장소 목록: {[p.get('name', '?') for p in verified_places[:5]]}")
         print()
         
+        # 🆕 사용된 장소 추적 (중복 방지)
+        used_places = set()  # 전체 기간 사용된 장소명
+        used_addresses = set()  # 전체 기간 사용된 주소
+        used_coords = []  # 사용된 좌표 [(lat, lng), ...]
+        
+        # 🆕 일자별 사용 추적 (같은 날 중복 방지)
+        used_today = {}  # {day: set([장소1, 장소2, ...])}
+        
         # AI가 생성한 일정과 8단계 검증된 장소 매칭
         for item in ai_result.get('schedule', []):
             place_name = item.get('place_name', '')
+            day = item.get('day', 1)
             
             # 정규화 함수 (띄어쓰기 제거)
             def normalize_name(name):
                 return name.lower().replace(' ', '').replace('-', '').replace('_', '')
             
-            # 검증된 장소에서 매칭되는 장소 찾기
-            matched_place = None
+            # 🆕 전체 기간 중복 체크 (다일 여행)
             normalized_place_name = normalize_name(place_name)
+            if normalized_place_name in used_places:
+                print(f"   ⚠️ 전체 중복 스킵: '{place_name}' ({day}일차, 이미 다른 날 사용됨)")
+                continue
+            
+            # 🆕 일내 중복 체크 (같은 날 2번 방문 방지)
+            if day not in used_today:
+                used_today[day] = set()
+            
+            if normalized_place_name in used_today[day]:
+                print(f"   ⚠️ {day}일차 중복 스킵: '{place_name}' (같은 날 이미 방문)")
+                continue
+            
+            # 검증된 장소에서 매칭되는 장소 찾기 (🆕 아직 사용되지 않은 장소만)
+            matched_place = None
             
             for verified_place in verified_places:
                 verified_name = verified_place.get('name', '')
                 normalized_verified_name = normalize_name(verified_name)
                 
+                # 🆕 이미 사용된 장소면 스킵
+                if normalized_verified_name in used_places:
+                    continue
+                
                 # 정규화된 이름으로 비교
                 if normalized_place_name in normalized_verified_name or \
                    normalized_verified_name in normalized_place_name:
                     matched_place = verified_place
-                    print(f"✅ 매칭 성공: '{place_name}' ↔ '{verified_name}'")
+                    print(f"✅ 매칭 성공: '{place_name}' ↔ '{verified_name}' ({day}일차)")
+                    
+                    # 🆕 사용됨으로 마킹 (전체 + 일자별)
+                    used_places.add(normalized_verified_name)
+                    used_today[day].add(normalized_verified_name)
+                    if verified_place.get('address'):
+                        used_addresses.add(verified_place['address'])
                     break
             
             if not matched_place:

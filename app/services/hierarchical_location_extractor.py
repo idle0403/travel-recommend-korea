@@ -3,14 +3,29 @@
 
 사용자 프롬프트에서 시 > 구 > 동 > POI 계층 구조를 추출하여
 지역 특정성을 최대한 보존합니다.
+
+🆕 지능형 확장: 고정 DB에 없는 지역은 AI+Google로 자동 학습
 """
 
 from typing import Dict, Any, List, Tuple, Optional
 import re
+import asyncio
 
 
 class HierarchicalLocationExtractor:
-    """프롬프트에서 계층적 지역 정보 추출"""
+    """프롬프트에서 계층적 지역 정보 추출 (정적 DB + 동적 학습)"""
+    
+    def __init__(self):
+        # 지능형 해석기 lazy loading
+        self._intelligent_resolver = None
+    
+    @property
+    def intelligent_resolver(self):
+        """지연 로딩으로 IntelligentLocationResolver 초기화"""
+        if self._intelligent_resolver is None:
+            from app.services.intelligent_location_resolver import get_intelligent_resolver
+            self._intelligent_resolver = get_intelligent_resolver()
+        return self._intelligent_resolver
     
     # 한국 주요 도시 행정구역 데이터
     KOREAN_LOCATIONS = {
@@ -103,6 +118,44 @@ class HierarchicalLocationExtractor:
         '제주': {
             '제주시': ['일도동', '이도동', '삼도동', '용담동', '건입동', '화북동', '삼양동', '봉개동', '아라동', '오라동', '연동', '노형동', '외도동', '이호동', '도두동'],
             '서귀포시': ['서귀동', '대륜동', '대정읍', '남원읍', '성산읍', '안덕면', '표선면']
+        },
+        # 🆕 경상북도 군 단위 (청도, 고령, 성주, 칠곡 등)
+        '청도': {
+            '청도군': ['화양읍', '각남면', '풍각면', '각북면', '이서면', '운문면', '매전면', '금천면']
+        },
+        '고령': {
+            '고령군': ['고령읍', '쌍림면', '운수면', '대가야읍', '성산면', '개진면', '다산면', '우곡면']
+        },
+        '성주': {
+            '성주군': ['성주읍', '선남면', '용암면', '수륜면', '금수면', '대가면', '벽진면', '초전면']
+        },
+        '칠곡': {
+            '칠곡군': ['왜관읍', '북삼읍', '석적읍', '약목면', '기산면', '지천면', '동명면']
+        },
+        # 🆕 경상남도 시/군 단위 (밀양, 합천, 창녕, 함안 등)
+        '밀양': {
+            '밀양시': ['내일동', '내이동', '교동', '삼문동', '가곡동', '삼랑진읍', '하남읍', '부북면', '상동면', '산내면', '산외면', '단장면', '상남면', '초동면', '무안면', '청도면']
+        },
+        '합천': {
+            '합천군': ['합천읍', '봉산면', '묘산면', '가야면', '야로면', '율곡면', '초계면', '쌍책면', '덕곡면', '청덕면', '적중면', '대양면', '쌍백면', '삼가면', '가회면', '대병면', '용주면']
+        },
+        '창녕': {
+            '창녕군': ['창녕읍', '남지읍', '고암면', '성산면', '대합면', '이방면', '유어면', '대지면', '계성면', '영산면', '장마면', '도천면', '길곡면']
+        },
+        '함안': {
+            '함안군': ['가야읍', '칠원읍', '함안면', '군북면', '법수면', '대산면', '칠서면', '칠북면', '산인면', '여항면']
+        },
+        '거창': {
+            '거창군': ['거창읍', '주상면', '웅양면', '고제면', '북상면', '위천면', '마리면', '남상면', '남하면', '신원면', '가조면', '가북면']
+        },
+        '산청': {
+            '산청군': ['산청읍', '차황면', '오부면', '생초면', '금서면', '삼장면', '시천면', '단성면', '신안면', '생비량면', '신등면']
+        },
+        '의령': {
+            '의령군': ['의령읍', '가례면', '칠곡면', '대의면', '화정면', '용덕면', '정곡면', '지정면', '낙서면', '부림면', '봉수면', '유곡면']
+        },
+        '함양': {
+            '함양군': ['함양읍', '마천면', '휴천면', '유림면', '수동면', '지곡면', '안의면', '서하면', '서상면', '백전면', '병곡면']
         }
     }
     
@@ -148,7 +201,15 @@ class HierarchicalLocationExtractor:
         '송도': ['센트럴파크', '송도국제도시', '송도컨벤시아', '트리플스트리트'],
         
         # 제주
-        '제주': ['제주공항', '이호테우해변', '용두암', '동문시장', '한라산', '성산일출봉', '우도', '섭지코지']
+        '제주': ['제주공항', '이호테우해변', '용두암', '동문시장', '한라산', '성산일출봉', '우도', '섭지코지'],
+        
+        # 🆕 경상도 소도시 POI
+        '청도': ['청도와인터널', '와인터널', '청도소싸움축제', '청도한우', '프로방스마을', '운문사', '청도읍', '청도역'],
+        '밀양': ['얼음골', '표충사', '영남루', '밀양아리랑', '위양못', '밀양시장', '밀양역'],
+        '합천': ['해인사', '팔만대장경', '합천호', '황매산', '합천영상테마파크', '합천역'],
+        '거창': ['거창읍', '거창한우', '수승대', '월성계곡', '거창역'],
+        '함양': ['상림공원', '함양읍', '지리산', '백두대간', '함양역'],
+        '산청': ['한방약초', '지리산', '단성면', '동의보감촌', '산청역']
     }
     
     # 컨텍스트 키워드 패턴
@@ -174,7 +235,7 @@ class HierarchicalLocationExtractor:
         }
     }
     
-    def extract_location_hierarchy(self, prompt: str) -> Dict[str, Any]:
+    async def extract_location_hierarchy(self, prompt: str) -> Dict[str, Any]:
         """
         프롬프트에서 계층적 지역 정보 추출
         
@@ -214,15 +275,62 @@ class HierarchicalLocationExtractor:
             'location_specificity': 'low'
         }
         
-        # 1. 도시 추출
-        for city in self.KOREAN_LOCATIONS.keys():
-            if city in prompt:
-                result['city'] = city
+        # 🆕 1. 출발지 제거: "출발지: XXX에서 시작하여" 한 덩어리로 제거
+        cleaned_prompt = prompt
+        
+        # ⚠️ CRITICAL: "출발지: ... 에서 시작하여"를 한 번에 제거해야 "청도에서"를 보존
+        # "출발지: 대한민국 인천광역시에서 시작하여" → 한 번에 제거
+        # "청도에서" → 유지!
+        start_location_pattern = r'출발지\s*[:：]\s*[^청]+?에서\s+시작하여\s*'
+        
+        before = cleaned_prompt
+        cleaned_prompt = re.sub(start_location_pattern, '', cleaned_prompt, flags=re.IGNORECASE)
+        
+        if before != cleaned_prompt:
+            removed = before.replace(cleaned_prompt, '***REMOVED***')
+            print(f"   🗑️ 출발지 제거: {removed[:150]}")
+        
+        print(f"🧹 출발지 제거 후 프롬프트: '{cleaned_prompt}'")
+        
+        # 🆕 2. 목적지 패턴 우선 인식: "~에서 [여행/맛집/관광/투어]"
+        destination_patterns = [
+            (r'([가-힣]{2,})에서\s*(여행|맛집|관광|투어|데이트|힐링|문화|쇼핑|체험)', '목적지패턴1'),
+            (r'([가-힣]{2,})\s*(여행|맛집|관광|투어|문화|쇼핑)', '목적지패턴2'),
+            (r'([가-힣]{2,})(?=\s+근처|일대|부근)', '근처패턴'),
+        ]
+        
+        target_city = None
+        for pattern, pattern_name in destination_patterns:
+            matches = re.finditer(pattern, cleaned_prompt)
+            for match in matches:
+                potential_city = match.group(1)
+                print(f"   🔍 패턴 '{pattern_name}' 후보: '{potential_city}'")
+                # KOREAN_LOCATIONS에 있는지 확인
+                if potential_city in self.KOREAN_LOCATIONS.keys():
+                    target_city = potential_city
+                    print(f"✅ 목적지 패턴 감지: '{potential_city}' (패턴: {pattern_name})")
+                    break
+            if target_city:
                 break
         
-        if not result['city']:
-            # 도시가 명시되지 않은 경우 기본값 서울
-            result['city'] = '서울'
+        # 3. 도시 추출 (목적지 패턴이 없으면 기존 방식)
+        if target_city:
+            result['city'] = target_city
+        else:
+            # 모든 도시 찾기 (우선순위: 긴 이름 → 짧은 이름)
+            cities_found = []
+            for city in sorted(self.KOREAN_LOCATIONS.keys(), key=len, reverse=True):
+                if city in cleaned_prompt:
+                    cities_found.append(city)
+            
+            if cities_found:
+                # 가장 먼저 나오는 도시 선택
+                result['city'] = cities_found[0]
+                print(f"ℹ️ 도시 감지 (일반): {result['city']} (후보: {cities_found})")
+            else:
+                # 도시가 명시되지 않은 경우 기본값 서울
+                result['city'] = '서울'
+                print(f"ℹ️ 도시 미감지 → 기본값 '서울' 사용")
         
         # 2. 동(neighborhood) 추출 (우선 처리)
         if result['city']:
@@ -238,15 +346,23 @@ class HierarchicalLocationExtractor:
                 if result['neighborhood']:
                     break
         
-        # 3. 구(district) 추출 (동이 없을 때만)
+        # 3. 구(district) 추출 (동이 없을 때만, 🆕 명확히 언급된 경우만)
         if result['city'] and not result['district']:
             for district in self.KOREAN_LOCATIONS[result['city']].keys():
-                if district in prompt:
+                # 🆕 구가 명확히 언급된 경우만 (단어 경계 체크)
+                # "서구"가 독립된 단어로 있어야 함 (예: "대구 서구", "서구 맛집")
+                # "서비스구역"처럼 일부만 매칭되는 건 제외
+                pattern = rf'\b{district}\b'  # 단어 경계
+                if re.search(pattern, cleaned_prompt):
                     result['district'] = district
                     result['search_radius_km'] = 2.0  # 구 레벨: 중간 반경
                     result['location_specificity'] = 'medium'
                     print(f"✅ 구 레벨 감지: {result['city']} {result['district']}")
                     break
+            
+            # 🆕 구가 감지되지 않으면 도시 전체로 검색 (더 안전)
+            if not result['district']:
+                print(f"ℹ️ 구 미감지 → '{result['city']}' 전체 검색 (넓은 범위)")
         
         # 4. POI 추출 (가장 구체적)
         for poi_area, poi_list in self.POI_KEYWORDS.items():
@@ -271,8 +387,8 @@ class HierarchicalLocationExtractor:
         for context_type in result['context']:
             result['context'][context_type] = list(set(result['context'][context_type]))
         
-        # 6. 좌표 변환
-        result['lat'], result['lng'] = self._get_coordinates(
+        # 6. 좌표 변환 (비동기)
+        result['lat'], result['lng'] = await self._get_coordinates(
             result['city'], 
             result['district'], 
             result['neighborhood'],
@@ -294,7 +410,7 @@ class HierarchicalLocationExtractor:
         
         return result
     
-    def _get_coordinates(
+    async def _get_coordinates(
         self, 
         city: Optional[str], 
         district: Optional[str], 
@@ -304,24 +420,61 @@ class HierarchicalLocationExtractor:
         """
         지역 정보를 위경도 좌표로 변환
         
-        우선순위: POI > 동 > 구 > 도시
+        우선순위: POI > 동 > 구 > 도시 > 🆕 AI 학습
         """
-        # POI 좌표 데이터베이스 (주요 랜드마크)
+        # POI 좌표 데이터베이스 (주요 랜드마크 + 🆕 역 출구)
         POI_COORDINATES = {
+            # 서울 주요 POI
             'LG사이언스파크': (37.5614, 126.8279),
             'LG 사이언스파크': (37.5614, 126.8279),
             '마곡나루역': (37.5605, 126.8251),
             '마곡역': (37.5602, 126.8255),
-            '강남역': (37.4981, 127.0276),
-            '테헤란로': (37.5009, 127.0359),
             'COEX': (37.5130, 127.0592),
             '코엑스': (37.5130, 127.0592),
-            '홍대입구역': (37.5571, 126.9245),
-            '여의도역': (37.5219, 126.9245),
             'IFC몰': (37.5251, 126.9261),
+            
+            # 🆕 강남역 및 출구
+            '강남역': (37.4981, 127.0276),
+            '강남역 1번출구': (37.4980, 127.0278),
+            '강남역 2번출구': (37.4979, 127.0275),
+            '강남역 10번출구': (37.4983, 127.0280),
+            '강남역 11번출구': (37.4984, 127.0282),
+            
+            # 🆕 역삼역 및 출구
+            '역삼역': (37.5009, 127.0359),
+            '역삼역 1번출구': (37.5010, 127.0361),
+            '역삼역 2번출구': (37.5008, 127.0357),
+            '역삼역 3번출구': (37.5011, 127.0362),
+            
+            # 🆕 홍대입구역 및 출구
+            '홍대입구역': (37.5571, 126.9245),
+            '홍대입구역 1번출구': (37.5572, 126.9247),
+            '홍대입구역 2번출구': (37.5570, 126.9243),
+            '홍대입구역 9번출구': (37.5575, 126.9250),
+            
+            # 🆕 여의도역 및 출구
+            '여의도역': (37.5219, 126.9245),
+            '여의도역 1번출구': (37.5220, 126.9247),
+            '여의도역 3번출구': (37.5218, 126.9243),
+            
+            # 🆕 명동역 및 출구  
             '명동역': (37.5610, 126.9865),
+            '명동역 6번출구': (37.5611, 126.9867),
+            '명동역 7번출구': (37.5609, 126.9863),
+            
+            # 🆕 서울역 및 출구
+            '서울역': (37.5547, 126.9707),
+            '서울역 1번출구': (37.5548, 126.9709),
+            '서울역 2번출구': (37.5546, 126.9705),
+            
+            # 테헤란로
+            '테헤란로': (37.5009, 127.0359),
+            
+            # 부산
             '해운대해수욕장': (35.1631, 129.1635),
-            '센텀시티': (35.1694, 129.1308)
+            '해운대역': (35.1631, 129.1635),
+            '센텀시티': (35.1694, 129.1308),
+            '서면역': (35.1561, 129.0601)
         }
         
         # 1. POI가 있으면 POI 좌표 우선
@@ -379,6 +532,7 @@ class HierarchicalLocationExtractor:
         
         # 4. 도시 좌표 (기본값)
         CITY_COORDINATES = {
+            # 광역시/특별시
             '서울': (37.5665, 126.9780),
             '부산': (35.1796, 129.0756),
             '대구': (35.8714, 128.6014),
@@ -386,16 +540,54 @@ class HierarchicalLocationExtractor:
             '광주': (35.1595, 126.8526),
             '대전': (36.3504, 127.3845),
             '울산': (35.5384, 129.3114),
-            '제주': (33.4996, 126.5312)
+            '제주': (33.4996, 126.5312),
+            
+            # 🆕 경상북도 시/군
+            '청도': (35.6479, 128.7334),
+            '고령': (35.7273, 128.2627),
+            '성주': (35.9194, 128.2822),
+            '칠곡': (35.9943, 128.4016),
+            
+            # 🆕 경상남도 시/군
+            '밀양': (35.5034, 128.7466),
+            '합천': (35.5667, 128.1657),
+            '창녕': (35.5445, 128.4921),
+            '함안': (35.2722, 128.4062),
+            '거창': (35.6869, 127.9094),
+            '산청': (35.4151, 127.8735),
+            '의령': (35.3222, 128.2619),
+            '함양': (35.5205, 127.7252)
         }
         
         if city and city in CITY_COORDINATES:
             print(f"   좌표 출처: 도시 ({city})")
             return CITY_COORDINATES[city]
         
-        # 기본값: 서울
-        print(f"   좌표 출처: 기본값 (서울)")
-        return (37.5665, 126.9780)
+        # 🆕 5. 지능형 해석기로 동적 조회 (AI + Google)
+        if city:
+            print(f"   🧠 지능형 해석기 호출: {city}")
+            
+            try:
+                # 비동기 메서드이므로 직접 await
+                location_info = await self.intelligent_resolver.resolve_location(city)
+                
+                if location_info and location_info.get('lat') and location_info.get('lng'):
+                    lat = location_info['lat']
+                    lng = location_info['lng']
+                    confidence = location_info.get('confidence', 0)
+                    
+                    print(f"   ✅ AI 학습 완료: ({lat}, {lng})")
+                    print(f"      전체 이름: {location_info.get('full_name', 'N/A')}")
+                    print(f"      신뢰도: {confidence:.2f}")
+                    
+                    return (lat, lng)
+                        
+            except Exception as e:
+                print(f"   ⚠️ 지능형 해석 실패: {e}")
+        
+        # 6. 최종 기본값: 대한민국 중부
+        print(f"   좌표 출처: 기본값 (대한민국 중부)")
+        return (35.5, 128.5)
     
     def _build_location_text(self, location_hierarchy: Dict) -> str:
         """검색 쿼리용 위치 텍스트 생성"""

@@ -14,20 +14,19 @@
         <div class="text-center mb-8">
             <div class="flex justify-between items-center mb-4">
                 <div></div>
-                <div id="authButtons" class="space-x-2">
-                    <a href="login.html" class="px-4 py-2 text-blue-600 border border-blue-600 rounded hover:bg-blue-50">로그인</a>
-                    <a href="register.html" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">회원가입</a>
+                <!-- 🆕 로컬 히스토리 버튼 (로그인 불필요) -->
+                <div class="space-x-2">
+                    <button onclick="showHistory()" class="px-4 py-2 text-blue-600 border border-blue-600 rounded hover:bg-blue-50">
+                        <i class="fas fa-history mr-1"></i>내 여행 기록 (<span id="historyCount">0</span>)
+                    </button>
+                    <button onclick="clearHistory()" class="px-3 py-2 text-red-600 border border-red-600 rounded hover:bg-red-50">
+                        <i class="fas fa-trash mr-1"></i>전체 삭제
+                    </button>
                 </div>
-                <div id="userInfo" class="hidden space-x-2">
-                    <a href="history.html" class="px-4 py-2 text-blue-600 border border-blue-600 rounded hover:bg-blue-50">
-                        <i class="fas fa-history mr-1"></i>내 여행
-                    </a>
-                    <span id="userName" class="text-gray-700"></span>
-                    <button id="logoutBtn" class="px-4 py-2 text-red-600 border border-red-600 rounded hover:bg-red-50">로그아웃</button>
-                </div>
+                <div></div>
             </div>
             <h1 class="text-4xl font-bold text-gray-800 mb-2">🇰🇷 스마트 한국 여행 플래너</h1>
-            <p class="text-gray-600">AI가 추천하는 맞춤형 한국 여행 계획</p>
+            <p class="text-gray-600">AI가 추천하는 맞춤형 한국 여행 계획 (로컬 전용, 로그인 불필요)</p>
         </div>
 
         <!-- Main Form -->
@@ -36,9 +35,11 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">
-                            <i class="fas fa-map-marker-alt text-red-500"></i> 여행 도시
+                            <i class="fas fa-map-marker-alt text-red-500"></i> 여행 도시 (선택사항)
+                            <span class="text-xs text-gray-500 ml-2">💡 프롬프트에서 자동 인식됩니다</span>
                         </label>
                         <select id="city" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <option value="Auto">🤖 자동 인식 (프롬프트에서 추출)</option>
                             <optgroup label="특별시">
                                 <option value="Seoul">서울특별시</option>
                             </optgroup>
@@ -227,9 +228,18 @@
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-2">
                         <i class="fas fa-comment text-green-500"></i> 여행 요청사항
+                        <span class="text-xs text-blue-600 ml-2">✨ 지역명을 포함하면 자동으로 해당 지역 정보를 수집합니다!</span>
                     </label>
-                    <textarea id="prompt" rows="4" placeholder="예: 맛집 위주로 가족 여행 계획을 세워주세요"
+                    <textarea id="prompt" rows="4" placeholder="예: 청도에서 맛집 위주로 가족 여행 계획을 세워주세요
+예: 밀양 얼음골 근처에서 자연 여행
+예: 합천 해인사 일대 문화 탐방
+
+💡 전국 어디든 지역명만 입력하면 자동으로 정보를 수집합니다!"
                               class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"></textarea>
+                    <div class="mt-2 text-xs text-gray-500">
+                        <i class="fas fa-lightbulb text-yellow-500 mr-1"></i>
+                        <strong>TIP:</strong> 청도, 밀양, 합천 등 소도시도 자동으로 지역 정보를 수집하여 추천합니다!
+                    </div>
                 </div>
 
                 <button type="submit" id="submitBtn"
@@ -240,10 +250,29 @@
             </form>
         </div>
 
-        <!-- Loading -->
-        <div id="loading" class="hidden text-center py-8">
-            <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-            <p class="mt-4 text-gray-600">AI가 맞춤형 여행 계획을 생성하고 있습니다...</p>
+        <!-- Loading (🆕 실시간 로그 포함) -->
+        <div id="loading" class="hidden max-w-2xl mx-auto">
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <div class="text-center mb-4">
+                    <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+                    <p class="mt-4 text-gray-800 font-medium">AI가 맞춤형 여행 계획을 생성하고 있습니다...</p>
+                </div>
+                <!-- 🆕 실시간 로그 -->
+                <div class="bg-gray-50 rounded-lg p-4 max-h-96 overflow-y-auto">
+                    <div id="progressLog" class="space-y-2 text-sm">
+                        <div class="text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i>준비 중...</div>
+                    </div>
+                    <!-- 진행률 바 -->
+                    <div class="mt-4">
+                        <div class="w-full bg-gray-200 rounded-full h-2">
+                            <div id="progressBar" class="bg-blue-500 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-1 text-center">
+                            <span id="progressText">0%</span>
+                        </p>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Results -->
@@ -311,17 +340,31 @@
                         <div id="weatherContent" class="space-y-2"></div>
                     </div>
 
-                    <!-- 여행 계획 저장 -->
+                    <!-- 저장 상태 (🆕 자동 저장) -->
                     <div class="bg-white rounded-lg shadow-lg p-6">
                         <h3 class="text-lg font-semibold text-gray-800 mb-3">
-                            <i class="fas fa-save text-green-500"></i> 여행 계획 저장
+                            <i class="fas fa-save text-green-500"></i> 저장 상태
                         </h3>
                         <div class="space-y-3">
-                            <button id="savePlanBtn" class="w-full bg-green-500 text-white py-2 rounded hover:bg-green-600">
-                                <i class="fas fa-bookmark mr-2"></i>내 여행 계획에 저장
-                            </button>
+                            <!-- 🆕 자동 저장 안내 (로그인 불필요) -->
+                            <div class="bg-green-50 border border-green-200 rounded p-4">
+                                <div class="flex items-center space-x-2 mb-2">
+                                    <i class="fas fa-check-circle text-green-600 text-xl"></i>
+                                    <span class="text-sm text-green-800 font-bold">
+                                        ✅ 브라우저에 자동 저장 완료!
+                                    </span>
+                                </div>
+                                <p class="text-xs text-green-700 ml-8">
+                                    상단 "내 여행 기록" 버튼을 클릭하여 언제든 확인하고 불러올 수 있습니다.
+                                </p>
+                                <p class="text-xs text-gray-500 ml-8 mt-1">
+                                    💡 로그인 없이 최대 50개까지 저장됩니다.
+                                </p>
+                            </div>
+                            
+                            <!-- Notion 저장 (선택적) -->
                             <button id="saveNotionBtn" class="w-full bg-purple-500 text-white py-2 rounded hover:bg-purple-600">
-                                <i class="fas fa-database mr-2"></i>Notion에 저장
+                                <i class="fas fa-database mr-2"></i>Notion에도 저장 (선택)
                             </button>
                         </div>
                         <div id="saveResult" class="mt-3 hidden"></div>
