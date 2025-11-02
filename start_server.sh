@@ -12,7 +12,7 @@ NC='\033[0m' # No Color
 
 # 가상환경 확인
 if [[ "$VIRTUAL_ENV" == "" ]]; then
-    echo -e "${YELLOW}⚠️  가상환경을 활성화하세요: source ../bin/activate${NC}"
+    echo -e "${YELLOW}⚠️ 가상환경을 활성화하세요: source .venv/bin/activate${NC}"
     exit 1
 fi
 
