@@ -1213,6 +1213,10 @@ class EnhancedPlaceDiscoveryService:
             radius_km = frame_item.get('search_radius_km', 3.0)
             purpose = frame_item.get('purpose', '')
             
+            # 🚫 키워드에서 찜질방/사우나 관련 단어 제거
+            unwanted_keywords = ['찜질방', '사우나', '목욕탕', '스파', '대중탕', '실내온천', '찜질']
+            keywords = [k for k in keywords if k not in unwanted_keywords]
+            
             # 🚫 찜질방/사우나 타입은 즉시 스킵 (로그도 간단하게)
             if place_type in ['spa', 'hot_spring_spa', 'sauna', 'jjimjilbang']:
                 print(f"\n   [{idx}/{len(schedule_frame)}] 🚫 {place_type} 타입 스킵 (여행지 부적합)")
