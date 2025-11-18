@@ -26,7 +26,7 @@ class AIScheduleFramer:
         
         # Redis 설정
         self.redis_client = None
-        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
         
         try:
             self.redis_client = redis.from_url(

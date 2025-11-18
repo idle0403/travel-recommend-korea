@@ -14,9 +14,9 @@
 
 **로그인 불필요, Docker로 즉시 실행** - 🌍 **전세계 모든 도시 지원!**
 
-### ✨ 핵심 특징 (2025-11-18 업데이트: AI 필수 랜드마크 자동 추천)
+### ✨ 핵심 특징 (2025-11-19 업데이트: AI 일괄 필터링)
 
-- 🏛️ **AI 필수 랜드마크**: GPT-5가 도시별 대표 관광지 자동 추천 + 거리 필터링 우회 (순천→순천만국가정원 보장)
+- 🤖 **AI 일괄 필터링**: 전체 일정을 한 번에 AI가 분석, 최적 조합 선택 (AI 호출 87.5%↓, 비용 절감!)
 - 🌍 **전세계 여행 지원**: 도쿄, 파리, 뉴욕, 방콕 등 **전세계 모든 국가/도시** 지원
 - 🚇 **글로벌 대중교통**: 좌표 기반 국가 코드 자동 감지 + 멀티-리전 폴백 (전세계 어디서든 작동)
 - 🤖 **GPT-5 도시 자동 추출**: 국가/주/도시 계층 구조 자동 분석
@@ -851,68 +851,172 @@ function createTransportButtons(distance) {
 
 ## 🆕 2025-11-18 최신 업데이트
 
-### 🏛️ AI 기반 필수 랜드마크 우선 추천 (NEW!)
+### 🤖 AI 기반 전체 카테고리 추천 시스템 (NEW!)
 
 **문제점**:
 - 순천 여행인데 "순천만국가정원"이 추천에서 빠지는 치명적 문제 발생
-- 도시별 대표 관광지를 정적 DB로 관리하기엔 전세계 도시가 너무 많음
+- AI 스케줄 프레이머가 "사우나", "목욕탕" 같은 동네 시설을 추천
+- 여행답지 않은 장소들이 결과에 포함됨 (예: 삼우목욕탕, 신대사우나)
 
-**해결책: AI에게 실시간으로 물어보기**
+**🆕 해결책: Google Places 검색 → AI 일괄 필터링**
 
 ```python
-# enhanced_place_discovery_service.py (606-688번 줄)
+# enhanced_place_discovery_service.py
 
-async def get_city_must_visit_landmarks(self, city: str) -> List[str]:
+async def discover_places_sequential(schedule_frame, base_location, city):
     """
-    🆕 AI를 활용하여 도시별 필수 방문 랜드마크 추출 (Redis 캐싱)
-    
-    예시:
-    - 순천 → ["순천만국가정원", "순천만습지", "낙안읍성"]
-    - 교토 → ["기요미즈데라", "후시미이나리", "금각사"]
-    - 파리 → ["에펠탑", "루브르박물관", "개선문"]
+    🆕 일괄 처리 방식: 모든 장소 검색 → AI 한 번에 필터링
     """
-    # Step 1: Redis 캐시 확인 (30일 저장)
-    cached = ai_cache.get_cached_ai_response('must_visit_landmarks', city)
-    if cached:
-        return cached.get('landmarks', [])
+    # Step 1: 모든 시간대에 대해 Google Places 검색 (AI 없이)
+    all_places_by_timeslot = {}
+    for idx, frame_item in enumerate(schedule_frame):
+        places = await self._search_places_nearby_raw(...)  # AI 없이
+        all_places_by_timeslot[idx] = places  # 결과 저장
     
-    # Step 2: OpenAI GPT-5에게 물어보기
-    prompt = f"""
-{city}의 대표 관광지/랜드마크를 3-5개 추천해주세요.
-**조건**: 반드시 가봐야 하는 곳, 정확한 장소명
-**응답 형식 (JSON만)**:
-{{"landmarks": ["랜드마크1", "랜드마크2", "랜드마크3"]}}
-"""
+    # Step 2: AI에게 모든 장소를 한 번에 보내서 최적 조합 선택
+    selected_map = await self.filter_all_places_batch(
+        schedule_frame, all_places_by_timeslot, city
+    )
     
-    # Step 3: 관광지 검색 시 자동으로 우선 검색
-    if place_type == 'tourist_attraction':
-        landmarks = await self.get_city_must_visit_landmarks(city)
-        enhanced_keywords = landmarks + keywords  # 랜드마크 우선!
+    # Step 3: 선택된 장소로 스케줄 채우기
+    for idx, frame_item in enumerate(schedule_frame):
+        selected_place = selected_map.get(idx)
+        if selected_place:
+            filled_schedule.append(selected_place)
+    
+    return filled_schedule
+
+async def filter_all_places_batch(schedule_frame, all_places_by_timeslot, city):
+    """
+    🆕 모든 시간대의 장소를 한 번에 AI에게 보내서 최적 조합 선택
+    
+    프롬프트 예시:
+    "당신은 순천 여행 큐레이터입니다.
+    아래는 전체 일정과 각 시간대의 후보 장소입니다.
+    **각 시간대마다 가장 적합한 장소 1개씩** 선택해주세요.
+    
+    **선별 기준**:
+    1. 시간대와 목적에 맞는 장소
+    2. 여행지로서 가치있는 곳 (동네 시설 제외)
+    3. 체인점 제외 (스타벅스, 맥도날드 등)
+    4. 전체 동선 최적화 고려
+    
+    **일정**:
+    [0] 09:00-11:00 - 오전 관광 (관광지)
+        후보: 순천만국가정원, 순천만습지, 낙안읍성, 죽도봉공원, 삼우목욕탕
+    [1] 12:00-13:30 - 점심 (맛집)
+        후보: 맛의거리, 순천만오리정, 시골집식당, 맥도날드
+    [2] 15:00-17:00 - 오후 관광 (카페)
+        후보: 카페 순천, 스타벅스, 로컬카페A
+    
+    **응답**: {"selections": [
+        {"index": 0, "selected_place": "순천만국가정원", "reason": "대표 랜드마크"},
+        {"index": 1, "selected_place": "순천만오리정", "reason": "현지 맛집"},
+        {"index": 2, "selected_place": "로컬카페A", "reason": "감성 있는 카페"}
+    ]}"
+    """
+    response = await client.chat.completions.create(
+        model="gpt-5",
+        max_completion_tokens=2000,  # 전체 일정이므로 넉넉하게
+        messages=[...]
+    )
+    
+    # JSON 파싱 및 매핑
+    result = json.loads(content)
+    selections = result.get('selections', [])
+    
+    # {index: place} 매핑 생성
+    selected_map = {}
+    for sel in selections:
+        idx = sel.get('index')
+        place_name = sel.get('selected_place')
+        # 해당 시간대의 장소 목록에서 이름 매칭
+        for place in all_places_by_timeslot[idx]:
+            if place.get('name') == place_name:
+                selected_map[idx] = place
+                break
+    
+    return selected_map
 ```
 
-**장점**:
-- ✅ **전세계 모든 도시** 대응 가능 (정적 DB 불필요)
-- ✅ **Redis 캐싱**으로 같은 도시는 다시 물어보지 않음
-- ✅ **순천 → 순천만국가정원 자동 추천** 보장
-- ✅ **AI가 최신 관광 트렌드 반영**
+**🆕 일괄 필터링의 장점**:
+- ✅ **AI 호출 87.5% 감소**: 8회 → 1회 (하루 8개 시간대 기준)
+- ✅ **비용 절감**: OpenAI API 비용 대폭 감소
+- ✅ **전체 맥락 고려**: AI가 전체 일정을 보고 최적 조합 선택
+- ✅ **동선 최적화**: 이동 거리와 시간대를 함께 고려
+- ✅ **동네 사우나 제외**, 여행지답게 감성있는 온천만 추천
+- ✅ **체인점 제외**, 현지 고유 맛집/카페만 추천
+- ✅ **전세계 모든 도시 대응** (정적 DB 불필요)
+
+**🔧 AI 응답 안정성 강화**:
+```python
+# max_completion_tokens 최적화
+# - filter_all_places_batch: 2000 tokens (전체 일정이므로 넉넉하게)
+# - analyze_nearby_regions_with_ai: 1000 tokens
+# - analyze_travel_style: 1000 tokens
+
+# JSON 파싱 에러 처리 (모든 AI 함수)
+# 1. JSON 코드 블록 제거 (```json ... ```)
+# 2. 빈 응답 감지 및 폴백
+# 3. 안전한 json.loads()
+```
+
+**개선 효과**:
+- ✅ **"Expecting value: line 1 column 1 (char 0)" 에러 해결**
+- ✅ **AI 응답 중단(truncation) 방지**
+- ✅ **빈 응답 시 안전한 폴백**
+
+**🆕 개선된 실행 흐름 (AI 일괄 필터링)**:
+```
+1️⃣ 순천 1박 2일 요청
+     ↓
+2️⃣ AI 스케줄 프레이머: 시간대별 장소 유형 결정
+   09:00 관광지, 12:00 맛집, 15:00 카페, 18:00 저녁, 20:00 야경
+     ↓
+3️⃣ 모든 시간대에 대해 Google Places 검색 (한 번에)
+   🏛️ 09:00 관광지: [순천만국가정원, 순천만습지, 낙안읍성, 죽도봉공원, 삼우목욕탕, ...] (30개)
+   🍽️ 12:00 맛집: [맛의거리, 순천만오리정, 시골집식당, 맥도날드, ...] (25개)
+   ☕ 15:00 카페: [카페 순천, 스타벅스, 로컬카페A, ...] (20개)
+   🌃 20:00 야경: [죽도봉공원, 순천만습지 석양, ...] (15개)
+     ↓
+4️⃣ 🤖 AI 일괄 필터링 (핵심! 한 번에 처리)
+   "다음은 순천 1박 2일 전체 일정과 각 시간대 후보 장소입니다.
+   전체 동선과 맥락을 고려하여 각 시간대마다 최적의 장소 1개씩 선택해주세요."
+   
+   AI가 전체를 보고 판단:
+   - 09:00 → "순천만국가정원" (대표 랜드마크)
+   - 12:00 → "순천만오리정" (현지 맛집, 체인점 제외)
+   - 15:00 → "로컬카페A" (스타벅스 제외)
+   - 20:00 → "순천만습지 석양" (야경 명소)
+     ↓
+5️⃣ 결과:
+   ✅ 09:00 순천만국가정원 (AI 선택)
+   ✅ 12:00 순천만오리정 (AI 선택)
+   ✅ 15:00 로컬카페A (AI 선택)
+   ✅ 20:00 순천만습지 석양 (AI 선택)
+   ❌ 삼우목욕탕, 죽도봉공원, 맥도날드, 스타벅스 모두 제외
+```
+
+**🎯 개선 효과**:
+- **AI 호출 횟수 감소**: 8회 → 1회 (하루 8개 시간대 기준)
+- **전체 맥락 고려**: AI가 전체 일정을 보고 최적 조합 선택
+- **동선 최적화**: 이동 거리와 시간대를 함께 고려
+- **비용 절감**: API 호출 87.5% 감소
+
+**📏 검색 반경**:
+| 장소 유형 | 검색 반경 | AI 필터링 |
+|---------|---------|----------|
+| 🏛️ 관광지 | 7km | ✅ 전체 일괄 처리 |
+| 🍽️ 맛집 | 5km | ✅ 전체 일괄 처리 |
+| ☕ 카페 | 3km | ✅ 전체 일괄 처리 |
+| ♨️ 온천 | 5km | ✅ 전체 일괄 처리 |
 
 **효과**:
-```
-🏛️ 순천 필수 랜드마크 (AI):
-   랜드마크: 순천만국가정원, 순천만습지, 낙안읍성
-   설명: 순천의 3대 대표 관광지로 자연과 역사를 모두 경험할 수 있습니다.
-
-🔍 검색 순서:
-1️⃣ 순천만국가정원 (AI 최우선) - 🏛️ 거리 필터링 우회!
-2️⃣ 순천만습지 (AI 최우선) - 🏛️ 거리 필터링 우회!
-3️⃣ 낙안읍성 (AI 최우선) - 🏛️ 거리 필터링 우회!
-4️⃣ 관광지 (일반 키워드)
-
-📏 거리 필터링 규칙:
-- 일반 장소: 설정된 반경 내만 (예: 관광지 7km)
-- 🏛️ AI 랜드마크: 최대 30km까지 허용 (거리 무관!)
-  → 순천만국가정원이 10km 떨어져도 무조건 포함 ✅
-```
+- ✅ **동네 사우나 → AI가 제외** (삼우목욕탕, 신대사우나 등)
+- ✅ **체인점 → AI가 제외** (스타벅스, 맥도날드 등)
+- ✅ **일반 공원 → AI가 제외** (동네 놀이터 등)
+- ✅ **순천만국가정원 → AI가 우선 선택** (대표 관광지)
+- ✅ 여행지답게 퀄리티 있는 장소만 선별
 
 ---
 

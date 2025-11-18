@@ -603,28 +603,23 @@ class EnhancedPlaceDiscoveryService:
         
         return is_sufficient
     
-    async def get_city_must_visit_landmarks(self, city: str) -> List[str]:
+    async def filter_all_places_batch(
+        self,
+        schedule_frame: List[Dict[str, Any]],
+        all_places_by_timeslot: Dict[int, List[Dict[str, Any]]],
+        city: str
+    ) -> Dict[int, Dict[str, Any]]:
         """
-        🆕 AI를 활용하여 도시별 필수 방문 랜드마크 추출 (Redis 캐싱 적용)
+        🆕 모든 시간대의 장소를 한 번에 AI에게 보내서 최적의 조합 선택
         
         Args:
-            city: 도시명 (예: "순천", "교토", "파리")
+            schedule_frame: 스케줄 프레임 (시간대별 정보)
+            all_places_by_timeslot: {timeslot_index: [places]} 형태
+            city: 도시명
         
         Returns:
-            필수 랜드마크 리스트 (예: ["순천만국가정원", "순천만습지", "낙안읍성"])
+            {timeslot_index: selected_place} 형태
         """
-        # Step 1: AI 캐시 확인
-        from app.services.ai_cache_service import get_ai_cache_service
-        ai_cache = get_ai_cache_service()
-        
-        cached_result = ai_cache.get_cached_ai_response('must_visit_landmarks', city)
-        
-        if cached_result:
-            landmarks = cached_result.get('landmarks', [])
-            print(f"\n🏛️ {city} 필수 랜드마크 (캐시): {', '.join(landmarks)}")
-            return landmarks
-        
-        # Step 2: OpenAI API 호출
         try:
             from openai import AsyncOpenAI
             import os
@@ -632,60 +627,271 @@ class EnhancedPlaceDiscoveryService:
             
             api_key = os.getenv("OPENAI_API_KEY")
             if not api_key:
-                print(f"   ℹ️ OpenAI API 키 없음 → 일반 검색 사용")
-                return []
+                print(f"   ℹ️ OpenAI API 키 없음 → 개별 필터링으로 폴백")
+                return {}
             
             client = AsyncOpenAI(api_key=api_key)
             
-            prompt = f"""
-{city}의 대표 관광지/랜드마크를 3-5개 추천해주세요.
+            # 프롬프트 생성: 전체 스케줄과 모든 장소 목록
+            prompt = f"""당신은 {city} 여행 큐레이터입니다.
+아래는 여행 일정과 각 시간대에 검색된 장소 목록입니다.
+**각 시간대마다 가장 적합한 장소 1개씩** 선택해주세요.
 
-**조건**:
-1. 이 도시를 방문하면 **반드시 가봐야 하는** 곳
-2. 관광객들이 가장 많이 찾는 명소
-3. 도시를 대표하는 상징적인 장소
-4. 정확한 장소명으로 응답
+**선별 기준**:
+1. 시간대와 목적에 맞는 장소
+2. 여행지로서 가치있는 곳 (동네 시설 제외)
+3. 체인점 제외 (스타벅스, 맥도날드 등)
+4. 전체 동선 최적화 고려
 
-**응답 형식 (JSON만)**:
-{{
-  "landmarks": ["랜드마크1", "랜드마크2", "랜드마크3"],
-  "description": "1문장 설명"
-}}
-
-예시:
-- 순천 → {{"landmarks": ["순천만국가정원", "순천만습지", "낙안읍성"]}}
-- 도쿄 → {{"landmarks": ["도쿄타워", "센소지", "시부야크로싱"]}}
-- 파리 → {{"landmarks": ["에펠탑", "루브르박물관", "개선문"]}}
-
-**중요**: JSON만 응답하세요."""
+**일정**:
+"""
+            
+            for idx, frame_item in enumerate(schedule_frame):
+                time_slot = frame_item.get('time_slot', '')
+                place_type = frame_item.get('place_type', '')
+                purpose = frame_item.get('purpose', '')
+                
+                places_for_slot = all_places_by_timeslot.get(idx, [])
+                place_names = [p.get('name', '') for p in places_for_slot[:10]]  # 상위 10개만
+                
+                prompt += f"\n[{idx}] {time_slot} - {purpose} ({self._get_place_type_korean(place_type)})\n"
+                prompt += f"    후보: {', '.join(place_names)}\n"
+            
+            prompt += """
+**응답 형식** (JSON만):
+{
+  "selections": [
+    {"index": 0, "selected_place": "장소명", "reason": "선택 이유"},
+    {"index": 1, "selected_place": "장소명", "reason": "선택 이유"}
+  ]
+}
+"""
+            
+            print(f"\n🤖 AI 일괄 필터링 시작 (전체 {len(schedule_frame)}개 시간대)")
             
             response = await client.chat.completions.create(
                 model="gpt-5",
                 messages=[
-                    {"role": "system", "content": "당신은 전세계 관광 전문가입니다. 각 도시의 대표 랜드마크를 추천합니다."},
+                    {"role": "system", "content": "당신은 여행 큐레이터입니다. 전체 일정을 보고 최적의 장소 조합을 선택합니다."},
                     {"role": "user", "content": prompt}
                 ],
-                max_completion_tokens=500
+                max_completion_tokens=2000
             )
             
             content = response.choices[0].message.content.strip()
+            
+            # JSON 파싱
+            if content.startswith('```'):
+                content = content.split('```')[1]
+                if content.startswith('json'):
+                    content = content[4:]
+                content = content.strip()
+            
+            if not content:
+                print(f"⚠️ AI 응답이 비어있음")
+                return {}
+            
             result = json.loads(content)
+            selections = result.get('selections', [])
             
-            landmarks = result.get('landmarks', [])
-            description = result.get('description', '')
+            print(f"✅ AI 선택 완료: {len(selections)}개")
             
-            print(f"\n🏛️ {city} 필수 랜드마크 (AI):")
-            print(f"   랜드마크: {', '.join(landmarks)}")
-            print(f"   설명: {description}")
+            # {index: place} 매핑 생성
+            selected_map = {}
+            for sel in selections:
+                idx = sel.get('index')
+                place_name = sel.get('selected_place', '')
+                reason = sel.get('reason', '')
+                
+                # 해당 시간대의 장소 목록에서 이름 매칭
+                places_for_slot = all_places_by_timeslot.get(idx, [])
+                for place in places_for_slot:
+                    if place.get('name') == place_name:
+                        selected_map[idx] = place
+                        print(f"   [{idx}] {place_name} - {reason}")
+                        break
             
-            # Step 3: Redis에 캐싱 (30일)
-            ai_cache.save_ai_response('must_visit_landmarks', city, result)
-            
-            return landmarks
+            return selected_map
             
         except Exception as e:
-            print(f"⚠️ AI 랜드마크 추출 실패: {e}")
+            print(f"⚠️ AI 일괄 필터링 실패: {e}")
+            return {}
+    
+    async def filter_places_with_ai(
+        self,
+        places: List[Dict[str, Any]],
+        city: str,
+        place_type: str,
+        max_count: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        🆕 AI를 활용하여 Google Places 결과 중 좋은 장소만 선별 (Redis 캐싱)
+        
+        Args:
+            places: Google Places 검색 결과 리스트
+            city: 도시명
+            place_type: 장소 유형
+            max_count: 최대 선별 개수
+        
+        Returns:
+            AI가 선별한 장소 리스트
+        """
+        if not places or len(places) == 0:
             return []
+        
+        # Step 1: 장소 이름 목록 생성
+        place_names = [p.get('name', '') for p in places if p.get('name')]
+        if len(place_names) == 0:
+            return places[:max_count]  # AI 없이 상위 N개 반환
+        
+        # Step 2: AI에게 선별 요청
+        try:
+            from openai import AsyncOpenAI
+            import os
+            import json
+            
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                print(f"   ℹ️ OpenAI API 키 없음 → 상위 {max_count}개 반환")
+                return places[:max_count]
+            
+            client = AsyncOpenAI(api_key=api_key)
+            
+            # place_type별 맞춤 프롬프트
+            prompt = self._build_filter_prompt(city, place_type, place_names, max_count)
+            
+            response = await client.chat.completions.create(
+                model="gpt-5",
+                messages=[
+                    {"role": "system", "content": "당신은 여행 큐레이터입니다. 장소 목록 중에서 여행지로서 가치있는 곳만 선별합니다."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_completion_tokens=1000  # 장소 목록이 많을 수 있으므로 넉넉하게
+            )
+            
+            content = response.choices[0].message.content.strip()
+            
+            # JSON 코드 블록 제거
+            if content.startswith('```'):
+                content = content.split('```')[1]
+                if content.startswith('json'):
+                    content = content[4:]
+                content = content.strip()
+            
+            # 빈 응답 처리
+            if not content:
+                print(f"⚠️ AI 응답이 비어있음, 상위 {max_count}개 반환")
+                return places[:max_count]
+            
+            result = json.loads(content)
+            selected_names = result.get('selected', [])
+            reason = result.get('reason', '')
+            
+            emoji = self._get_place_emoji(place_type)
+            print(f"\n{emoji} AI 필터링 완료:")
+            print(f"   입력: {len(places)}개 → 선별: {len(selected_names)}개")
+            print(f"   선택: {', '.join(selected_names)}")
+            print(f"   이유: {reason}")
+            
+            # Step 3: 선별된 장소만 반환 (순서 유지)
+            filtered = []
+            for place in places:
+                if place.get('name') in selected_names:
+                    place['is_ai_curated'] = True  # AI 선별 플래그
+                    filtered.append(place)
+            
+            return filtered if filtered else places[:max_count]
+            
+        except Exception as e:
+            print(f"⚠️ AI 필터링 실패: {e}, 상위 {max_count}개 반환")
+            return places[:max_count]
+    
+    def _build_filter_prompt(self, city: str, place_type: str, place_names: List[str], max_count: int) -> str:
+        """AI 필터링 프롬프트 생성"""
+        
+        if place_type == 'tourist_attraction':
+            criteria = """
+**선별 기준**:
+1. 이 도시를 방문하면 **반드시 가봐야 하는** 필수 관광지
+2. 관광객들이 가장 많이 찾는 명소
+3. 도시를 대표하는 상징적인 장소
+4. **동네 시설, 일반 공원은 제외**"""
+        
+        elif place_type == 'restaurant':
+            criteria = """
+**선별 기준**:
+1. 현지인과 관광객 모두 인정하는 맛집
+2. 이 도시의 특색을 느낄 수 있는 음식점
+3. **체인점(맥도날드, KFC 등) 제외**
+4. **일반 식당은 제외**, 유명 맛집만"""
+        
+        elif place_type == 'cafe':
+            criteria = """
+**선별 기준**:
+1. 분위기 좋고 감성적인 카페
+2. 관광객들이 많이 찾는 포토 스팟
+3. **스타벅스 같은 체인점 제외**
+4. 현지 특색 있는 카페만"""
+        
+        elif place_type == 'spa':
+            criteria = """
+**선별 기준**:
+1. **관광지로서 가치가 있는** 감성있는 온천/스파만
+2. **동네 목욕탕, 일반 사우나는 무조건 제외**
+3. 특색있는 온천 리조트, 스파 시설
+4. 의심스러우면 제외"""
+        
+        else:
+            criteria = """
+**선별 기준**:
+1. 관광객들이 방문하기 좋은 곳
+2. 여행지로서 가치가 있는 곳
+3. 체인점, 동네 시설 제외"""
+        
+        return f"""
+다음은 {city}의 {self._get_place_type_korean(place_type)} 검색 결과입니다.
+이 중에서 **최대 {max_count}개**를 선별해주세요.
+
+{criteria}
+
+**장소 목록**:
+{', '.join(place_names)}
+
+**응답 형식 (JSON만)**:
+{{
+  "selected": ["선별된 장소1", "선별된 장소2", "선별된 장소3"],
+  "reason": "선별 이유 1-2문장"
+}}
+
+**중요**: 
+- JSON만 응답하세요 (코드 블록 불필요)
+- 장소명은 위 목록에 있는 그대로 정확히 적으세요
+- 최대 {max_count}개까지만 선별
+"""
+    
+    def _get_place_emoji(self, place_type: str) -> str:
+        """place_type별 이모지 반환"""
+        emoji_map = {
+            'tourist_attraction': '🏛️',
+            'restaurant': '🍽️',
+            'cafe': '☕',
+            'bar': '🍷',
+            'spa': '♨️',
+            'night_view': '🌃'
+        }
+        return emoji_map.get(place_type, '📍')
+    
+    def _get_place_type_korean(self, place_type: str) -> str:
+        """place_type 한글명 반환"""
+        korean_map = {
+            'tourist_attraction': '필수 관광지',
+            'restaurant': '유명 맛집',
+            'cafe': '인기 카페',
+            'bar': '유명 바/야경',
+            'spa': '감성 온천/스파',
+            'night_view': '야경 명소'
+        }
+        return korean_map.get(place_type, '추천 장소')
     
     async def analyze_nearby_regions_with_ai(
         self,
@@ -760,10 +966,22 @@ class EnhancedPlaceDiscoveryService:
                     {"role": "system", "content": "당신은 한국 지리 전문가입니다. 여행 동선을 고려하여 근교 도시를 추천합니다."},
                     {"role": "user", "content": prompt}
                 ],
-                max_completion_tokens=500  # 200 → 500으로 증가
+                max_completion_tokens=1000
             )
             
             content = response.choices[0].message.content.strip()
+            
+            # JSON 코드 블록 제거
+            if content.startswith('```'):
+                content = content.split('```')[1]
+                if content.startswith('json'):
+                    content = content[4:]
+                content = content.strip()
+            
+            # 빈 응답 처리
+            if not content:
+                print(f"⚠️ AI 응답이 비어있음")
+                return []
             
             # JSON 파싱
             import json
@@ -887,22 +1105,17 @@ class EnhancedPlaceDiscoveryService:
         Returns:
             실제 장소 정보가 채워진 스케줄
         """
-        print(f"\n🔍 순차적 장소 검색 시작")
+        print(f"\n🔍 일괄 장소 검색 시작 (AI 한 번에 처리)")
         print(f"   스케줄 프레임: {len(schedule_frame)}개")
         print(f"   🎯 기준 위치 (base_location): {base_location}")
         print(f"      위도: {base_location[0]:.4f}")
         print(f"      경도: {base_location[1]:.4f}")
         
-        filled_schedule = []
+        # 🆕 Step 1: 모든 시간대에 대해 Google Places 검색 (AI 없이)
+        print(f"\n📋 Step 1: 모든 시간대 Google Places 검색")
+        all_places_by_timeslot = {}
         current_location = base_location
-        print(f"   🎯 초기 current_location: {current_location}")
-        used_places = set()  # 중복 방지
-        
-        # 🆕 일자별 도시 변경 추적
         current_city = city
-        current_day = 1
-        day_places_count = 0
-        MAX_PLACES_PER_DAY = 8  # 🆕 하루 최대 장소 수 제한
         
         for idx, frame_item in enumerate(schedule_frame, 1):
             day = frame_item.get('day', 1)
@@ -912,53 +1125,16 @@ class EnhancedPlaceDiscoveryService:
             radius_km = frame_item.get('search_radius_km', 3.0)
             purpose = frame_item.get('purpose', '')
             
-            # 🆕 일자별 장소 수 제한 체크
-            if day == current_day and day_places_count >= MAX_PLACES_PER_DAY:
-                print(f"   ⚠️ {current_day}일차 장소 수 제한 도달 ({day_places_count}/{MAX_PLACES_PER_DAY}) - 스킵")
-                continue
-            
-            # 🆕 날짜 변경 감지
-            if day != current_day:
-                print(f"\n📅 일자 변경 감지: {current_day}일차 → {day}일차")
-                
-                # 이전 날 장소 부족 확인
-                if day_places_count < 4:
-                    print(f"   ⚠️ {current_day}일차 장소 부족 ({day_places_count}개)")
-                    print(f"   🔄 근교 도시 확장 시도...")
-                    
-                    # AI로 근교 도시 추천
-                    nearby_cities = await self.analyze_nearby_regions_with_ai(current_city, 1)
-                    
-                    if nearby_cities:
-                        new_city = nearby_cities[0]
-                        print(f"   ✅ {day}일차는 {new_city}에서 시작")
-                        
-                        # 새 도시의 중심 좌표 가져오기
-                        try:
-                            from app.services.intelligent_location_resolver import IntelligentLocationResolver
-                            resolver = IntelligentLocationResolver()
-                            new_location_info = await resolver.resolve_location(new_city)
-                            current_location = (new_location_info['lat'], new_location_info['lng'])
-                            current_city = new_city
-                            print(f"   📍 새 위치: {current_location}")
-                        except Exception as e:
-                            print(f"   ⚠️ 새 도시 좌표 조회 실패: {e}, 기존 도시 유지")
-                    else:
-                        print(f"   ⚠️ 근교 도시 없음, {current_city} 유지")
-                
-                current_day = day
-                day_places_count = 0
-            
             print(f"\n   [{idx}/{len(schedule_frame)}] {day}일차 {time_slot} - {place_type}")
             print(f"      도시: {current_city}")
             print(f"      키워드: {keywords}")
             print(f"      현재 위치: {current_location}")
             print(f"      검색 반경: {radius_km}km")
             
-            # 이전 위치 기준 근처 장소 검색
+            # 이전 위치 기준 근처 장소 검색 (AI 없이)
             try:
-                places = await self._search_places_nearby(
-                    city=current_city,  # 🆕 동적으로 변경된 도시 사용
+                places = await self._search_places_nearby_raw(
+                    city=current_city,
                     keywords=keywords,
                     center_lat=current_location[0],
                     center_lng=current_location[1],
@@ -966,77 +1142,186 @@ class EnhancedPlaceDiscoveryService:
                     place_type=place_type
                 )
                 
-                # 중복 제거 및 최적 장소 선택
-                selected_place = None
-                for place in places:
+                # 결과 저장 (AI 필터링은 나중에 일괄 처리)
+                all_places_by_timeslot[idx-1] = places  # idx는 1부터 시작하므로 -1
+                print(f"      ✅ 검색 완료: {len(places)}개")
+                
+                # 🆕 임시로 첫 번째 장소를 current_location으로 설정 (동선 유지)
+                if places:
+                    current_location = (places[0].get('lat', current_location[0]), 
+                                      places[0].get('lng', current_location[1]))
+            
+            except Exception as e:
+                print(f"      ❌ 검색 실패: {e}")
+                all_places_by_timeslot[idx-1] = []
+        
+        # 🆕 Step 2: AI에게 모든 장소를 한 번에 보내서 최적 조합 선택
+        print(f"\n🤖 Step 2: AI 일괄 필터링")
+        selected_map = await self.filter_all_places_batch(
+            schedule_frame,
+            all_places_by_timeslot,
+            city
+        )
+        
+        # 🆕 Step 3: 선택된 장소로 스케줄 채우기
+        print(f"\n📝 Step 3: 스케줄 채우기")
+        filled_schedule = []
+        used_places = set()
+        
+        for idx, frame_item in enumerate(schedule_frame):
+            day = frame_item.get('day', 1)
+            time_slot = frame_item.get('time_slot', '')
+            place_type = frame_item.get('place_type', 'tourist_attraction')
+            purpose = frame_item.get('purpose', '')
+            
+            # AI가 선택한 장소 가져오기
+            selected_place = selected_map.get(idx)
+            
+            # 폴백: AI가 선택 못했으면 첫 번째 장소 사용
+            if not selected_place:
+                places_for_slot = all_places_by_timeslot.get(idx, [])
+                for place in places_for_slot:
                     place_id = place.get('name', '') + place.get('address', '')
                     if place_id not in used_places:
                         selected_place = place
                         used_places.add(place_id)
                         break
-                
-                if selected_place:
-                    # 🆕 Naver 블로그 후기 검색
-                    blog_reviews = []
-                    try:
-                        place_name = selected_place.get('name', '')
-                        if place_name:
-                            print(f"      📝 블로그 후기 검색 중: {place_name}")
-                            from app.services.naver_service import NaverService
-                            naver_service = NaverService()
-                            blog_results = await naver_service.search_blogs(f"{city} {place_name}", display=3)
-                            blog_reviews = blog_results[:3] if blog_results else []  # 🆕 장소당 최대 3개 블로그 제한
-                            if blog_reviews:
-                                print(f"      ✅ 블로그 후기 {len(blog_reviews)}개 수집")
-                                # 🆕 각 블로그 링크 확인
-                                for idx, blog in enumerate(blog_reviews, 1):
-                                    blog_link = blog.get('link') or blog.get('url') or ''
-                                    blog_title = blog.get('title', '제목없음')
-                                    print(f"         [{idx}] {blog_title[:30]}")
-                                    print(f"             링크: {blog_link[:80] if blog_link else '❌ 링크 없음!'}")
-                            else:
-                                print(f"      ⚠️ 블로그 후기 없음")
-                    except Exception as e:
-                        print(f"      ⚠️ 블로그 검색 실패: {e}")
-                    
-                    # 프레임 정보와 실제 장소 정보 병합
-                    filled_item = {
-                        "day": day,
-                        "time": time_slot.split('-')[0],  # 시작 시간만
-                        "place_name": selected_place.get('name'),
-                        "place_type": place_type,
-                        "purpose": purpose,
-                        "address": selected_place.get('address'),
-                        "lat": selected_place.get('lat'),
-                        "lng": selected_place.get('lng'),
-                        "description": selected_place.get('description', purpose),
-                        "rating": selected_place.get('rating', 0),
-                        "duration": f"{frame_item.get('expected_duration_minutes', 90)}분",
-                        "verified": True,
-                        "google_info": selected_place.get('google_info', {}),
-                        "naver_info": selected_place.get('naver_info', {}),
-                        "blog_reviews": blog_reviews  # 🆕 블로그 후기 추가
-                    }
-                    
-                    filled_schedule.append(filled_item)
-                    day_places_count += 1  # 🆕 일자별 장소 개수 카운트
-                    
-                    # 다음 검색을 위해 현재 위치 업데이트
-                    current_location = (
-                        selected_place.get('lat', current_location[0]),
-                        selected_place.get('lng', current_location[1])
-                    )
-                    
-                    print(f"      ✅ 선택: {selected_place.get('name')}")
-                else:
-                    print(f"      ⚠️ 적합한 장소 없음")
             
-            except Exception as e:
-                print(f"      ❌ 검색 실패: {e}")
-                continue
+            if selected_place:
+                # 중복 방지
+                place_id = selected_place.get('name', '') + selected_place.get('address', '')
+                used_places.add(place_id)
+                
+                # 🆕 Naver 블로그 후기 검색
+                blog_reviews = []
+                try:
+                    place_name = selected_place.get('name', '')
+                    if place_name:
+                        print(f"      📝 블로그 후기 검색 중: {place_name}")
+                        from app.services.naver_service import NaverService
+                        naver_service = NaverService()
+                        blog_results = await naver_service.search_blogs(f"{city} {place_name}", display=3)
+                        blog_reviews = blog_results[:3] if blog_results else []  # 🆕 장소당 최대 3개 블로그 제한
+                        if blog_reviews:
+                            print(f"      ✅ 블로그 후기 {len(blog_reviews)}개 수집")
+                            # 🆕 각 블로그 링크 확인
+                            for blog_idx, blog in enumerate(blog_reviews, 1):
+                                blog_link = blog.get('link') or blog.get('url') or ''
+                                blog_title = blog.get('title', '제목없음')
+                                print(f"         [{blog_idx}] {blog_title[:30]}")
+                                print(f"             링크: {blog_link[:80] if blog_link else '❌ 링크 없음!'}")
+                        else:
+                            print(f"      ⚠️ 블로그 후기 없음")
+                except Exception as e:
+                    print(f"      ⚠️ 블로그 검색 실패: {e}")
+                
+                # 프레임 정보와 실제 장소 정보 병합
+                filled_item = {
+                    "day": day,
+                    "time": time_slot.split('-')[0],  # 시작 시간만
+                    "place_name": selected_place.get('name'),
+                    "place_type": place_type,
+                    "purpose": purpose,
+                    "address": selected_place.get('address'),
+                    "lat": selected_place.get('lat'),
+                    "lng": selected_place.get('lng'),
+                    "description": selected_place.get('description', purpose),
+                    "rating": selected_place.get('rating', 0),
+                    "duration": f"{frame_item.get('expected_duration_minutes', 90)}분",
+                    "verified": True,
+                    "google_info": selected_place.get('google_info', {}),
+                    "naver_info": selected_place.get('naver_info', {}),
+                    "blog_reviews": blog_reviews  # 🆕 블로그 후기 추가
+                }
+                
+                filled_schedule.append(filled_item)
+                print(f"      ✅ 채움: {selected_place.get('name')}")
+            else:
+                print(f"      ⚠️ 적합한 장소 없음")
         
         print(f"\n✅ 순차적 장소 검색 완료: {len(filled_schedule)}개 장소")
         return filled_schedule
+    
+    async def _search_places_nearby_raw(
+        self,
+        city: str,
+        keywords: List[str],
+        center_lat: float,
+        center_lng: float,
+        radius_km: float,
+        place_type: str
+    ) -> List[Dict[str, Any]]:
+        """
+        🆕 Google Places 검색 + 거리 필터링만 (AI 없음)
+        일괄 처리를 위해 사용
+        """
+        all_places = []
+        
+        # Step 1: Google Places 검색 (광범위하게)
+        print(f"      🔍 Google Places 검색: {self._get_place_type_korean(place_type)}")
+        print(f"         키워드: {keywords[:2]}")
+        
+        for keyword in keywords[:2]:
+            query = f"{city} {keyword}"
+            
+            try:
+                google_results = await self.google_service.search_nearby_places(
+                    query=query,
+                    location=(center_lat, center_lng),
+                    radius=int(radius_km * 1000),
+                    language="ko"
+                )
+                
+                print(f"         📊 '{keyword}': {len(google_results)}개")
+                
+                for item in google_results:
+                    lat = item.get('lat')
+                    lng = item.get('lng')
+                    name = item.get('name', '')
+                    address = item.get('address', '')
+                    
+                    if lat and lng and -90 <= lat <= 90 and -180 <= lng <= 180:
+                        place = {
+                            "name": name,
+                            "address": address,
+                            "description": item.get('description', ''),
+                            "category": item.get('category', ''),
+                            "rating": item.get('rating', 0),
+                            "lat": lat,
+                            "lng": lng,
+                            "google_info": item
+                        }
+                        all_places.append(place)
+            
+            except Exception as e:
+                print(f"         ❌ 검색 실패 ({keyword}): {e}")
+        
+        # Step 2: 거리 필터링
+        print(f"      📏 거리 필터링: {len(all_places)}개 → {radius_km}km 이내")
+        
+        filtered_places = []
+        for place in all_places:
+            distance = self.geo_filter.calculate_distance(
+                center_lat, center_lng,
+                place['lat'], place['lng']
+            )
+            
+            if distance <= radius_km:
+                place['distance_from_center'] = distance
+                filtered_places.append(place)
+        
+        # 중복 제거 (이름 기준)
+        seen_names = set()
+        unique_places = []
+        for place in filtered_places:
+            if place['name'] not in seen_names:
+                seen_names.add(place['name'])
+                unique_places.append(place)
+        
+        print(f"         ✅ 거리 필터링 후: {len(unique_places)}개")
+        
+        # AI 필터링 없이 원본 반환 (일괄 처리용)
+        return unique_places
     
     async def _search_places_nearby(
         self,
@@ -1048,256 +1333,24 @@ class EnhancedPlaceDiscoveryService:
         place_type: str
     ) -> List[Dict[str, Any]]:
         """
-        특정 위치 근처에서 키워드로 장소 검색
-        
-        **개선된 로직**:
-        0. 🆕 관광지인 경우: AI에게 필수 랜드마크 먼저 물어보기
-        1. 캐시가 있으면 먼저 확인
-        2. 거리 필터링 적용
-        3. 결과가 부족하면 캐시 무시하고 새로 검색
+        특정 위치 근처에서 키워드로 장소 검색 + AI 필터링 (레거시)
         """
-        all_places = []
-        need_fresh_search = False
+        # Raw 검색 후 AI 필터링
+        places = await self._search_places_nearby_raw(
+            city, keywords, center_lat, center_lng, radius_km, place_type
+        )
         
-        # 🆕 Step 0: 관광지인 경우 AI에게 필수 랜드마크 물어보기
-        enhanced_keywords = keywords.copy()
-        landmark_keywords = []  # AI 랜드마크 키워드 추적
-        
-        if place_type == 'tourist_attraction':
-            landmarks = await self.get_city_must_visit_landmarks(city)
-            if landmarks:
-                print(f"   🏛️ AI 추천 필수 랜드마크 우선 검색: {landmarks}")
-                landmark_keywords = landmarks  # 랜드마크 키워드 저장
-                # 랜드마크를 키워드 앞에 추가 (우선순위 높임)
-                enhanced_keywords = landmarks + enhanced_keywords
-        
-        # 각 키워드로 검색
-        for keyword in enhanced_keywords[:4]:  # 최대 4개 (랜드마크 3개 + 일반 키워드 1개)
-            query = f"{city} {keyword}"
-            is_landmark = keyword in landmark_keywords  # 랜드마크 여부 체크
-            
-            # Step 1: 캐시 확인
-            cache_key = f"google_{self.cache_service.generate_search_key(city, keyword)}"
-            cached = self.cache_service.get_cached_data(cache_key)
-            
-            if cached:
-                print(f"   ✅ Redis 캐시 히트: {cache_key}")
-                # 🆕 랜드마크 플래그 추가
-                for place in cached:
-                    if is_landmark:
-                        place['is_must_visit_landmark'] = True
-                all_places.extend(cached)
-            else:
-                need_fresh_search = True
-                print(f"   ⚠️ Redis 캐시 미스: {cache_key}")
-        
-        # Step 2: 거리 필터링 (🆕 AI 랜드마크는 거리 관계없이 포함!)
-        print(f"      🔍 거리 필터링 시작: {len(all_places)}개")
-        print(f"         일반 장소: 반경 {radius_km}km 이내")
-        print(f"         🏛️ AI 랜드마크: 최대 30km 허용 (거리 무관)")
-        print(f"         중심: ({center_lat:.4f}, {center_lng:.4f})")
-        
-        filtered_places = []
-        MAX_LANDMARK_DISTANCE = 30.0  # 랜드마크 최대 거리 (km)
-        
-        for place in all_places:
-            if not place.get('lat') or not place.get('lng'):
-                continue
-            
-            distance = self.geo_filter.calculate_distance(
-                center_lat, center_lng,
-                place['lat'], place['lng']
+        # AI 필터링
+        if len(places) > 5:
+            print(f"      🤖 AI 필터링: {len(places)}개 → 최대 5개 선별")
+            filtered_by_ai = await self.filter_places_with_ai(
+                places,
+                city,
+                place_type,
+                max_count=5
             )
-            place['distance_from_center'] = distance
-            
-            is_landmark = place.get('is_must_visit_landmark', False)
-            
-            # 거리 필터링 로직
-            if is_landmark:
-                # 랜드마크는 30km까지 허용
-                if distance <= MAX_LANDMARK_DISTANCE:
-                    print(f"         🏛️ 랜드마크 포함: {place.get('name')} ({distance:.2f}km)")
-                    filtered_places.append(place)
-                else:
-                    print(f"         ⚠️ 랜드마크지만 너무 먼 거리: {place.get('name')} ({distance:.2f}km > 30km)")
-            else:
-                # 일반 장소는 설정된 반경 내만
-                if distance <= radius_km:
-                    filtered_places.append(place)
-        
-        # Step 3: 결과가 부족하면 새로 검색 (캐시가 있어도!)
-        if len(filtered_places) < 3 or need_fresh_search:
-            if len(filtered_places) < 3 and not need_fresh_search:
-                print(f"      ⚠️ 캐시 결과 부족 ({len(filtered_places)}개) → 새로 검색")
-            
-            # 새로 검색 (🆕 enhanced_keywords 사용!)
-            fresh_places = []
-            for keyword in enhanced_keywords[:4]:
-                query = f"{city} {keyword}"
-                is_landmark = keyword in landmark_keywords  # 🆕 랜드마크 여부 체크
-                cache_key = f"google_{self.cache_service.generate_search_key(city, keyword)}"
-                
-                try:
-                    if is_landmark:
-                        print(f"         🔍 Google Places 검색 [🏛️ 필수 랜드마크]: '{query}'")
-                    else:
-                        print(f"         🔍 Google Places 검색: '{query}'")
-                    print(f"            📍 검색 중심: ({center_lat:.4f}, {center_lng:.4f}) - {city}")
-                    print(f"            📏 검색 반경: {radius_km}km ({int(radius_km * 1000)}m)")
-                    
-                    google_results = await self.google_service.search_nearby_places(
-                        query=query,
-                        location=(center_lat, center_lng),
-                        radius=int(radius_km * 1000),  # km -> m
-                        language="ko"
-                    )
-                    print(f"         📊 Google 응답: {len(google_results)}개 결과")
-                    
-                    places_to_cache = []
-                    
-                    for idx, item in enumerate(google_results, 1):
-                        lat = item.get('lat')
-                        lng = item.get('lng')
-                        address = item.get('address', '')
-                        name = item.get('name', '')
-                        
-                        # 🆕 좌표와 주소 검증 로그
-                        print(f"            🔍 [{idx}] {name}")
-                        if lat and lng:
-                            print(f"               좌표: ({lat:.4f}, {lng:.4f})")
-                        else:
-                            print(f"               좌표: None")
-                        print(f"               주소: {address}")
-                        
-                        # 🌍 글로벌 좌표 검증 (전세계 대응)
-                        if lat and lng:
-                            # 유효한 좌표 범위: 위도 -90~90, 경도 -180~180
-                            if not (-90 <= lat <= 90 and -180 <= lng <= 180):
-                                print(f"               ⚠️ 유효하지 않은 좌표! 좌표 무효화")
-                                lat, lng = None, None
-                        
-                        # 🌍 주소 기반 지역 검증 (글로벌 대응)
-                        # 단순히 검색 도시명이 주소에 포함되는지 확인
-                        if address and city:
-                            city_in_address = city.lower() in address.lower()
-                            if city_in_address:
-                                print(f"               ✅ 주소 확인: '{city}' 포함됨")
-                            else:
-                                # 도시명이 주소에 없으면 경고 (하지만 거리 기반 필터링이 더 중요)
-                                print(f"               ⚠️ 주소 확인: '{city}' 미포함 (거리로 검증)")
-                        
-                        place = {
-                            "name": name,
-                            "address": address,
-                            "description": item.get('description', ''),
-                            "category": item.get('category', ''),
-                            "rating": item.get('rating', 0),
-                            "lat": lat,
-                            "lng": lng,
-                            "google_info": item
-                        }
-                        
-                        # 🆕 랜드마크 플래그 추가
-                        if is_landmark:
-                            place['is_must_visit_landmark'] = True
-                        
-                        if place['lat'] and place['lng']:
-                            # 거리 계산
-                            distance = self.geo_filter.calculate_distance(
-                                center_lat, center_lng,
-                                place['lat'], place['lng']
-                            )
-                            place['distance_from_center'] = distance
-                            
-                            # 🆕 랜드마크는 30km까지, 일반은 radius_km까지
-                            max_distance = MAX_LANDMARK_DISTANCE if is_landmark else radius_km
-                            
-                            if distance <= max_distance:
-                                fresh_places.append(place)
-                                places_to_cache.append(place)
-                                if is_landmark:
-                                    print(f"               ✅ 채택! [🏛️ 필수 랜드마크] 거리: {distance:.2f}km")
-                                else:
-                                    print(f"               ✅ 채택! 거리: {distance:.2f}km")
-                            else:
-                                if is_landmark:
-                                    print(f"               ❌ 거리 초과: {distance:.2f}km (랜드마크 최대 {MAX_LANDMARK_DISTANCE}km)")
-                                else:
-                                    print(f"               ❌ 거리 초과: {distance:.2f}km (>{radius_km}km)")
-                    
-                    # 캐시 저장 (필터링 전 전체 데이터)
-                    if places_to_cache:
-                        # 원본 데이터를 캐시 (거리 정보 제외)
-                        cache_data = [{k: v for k, v in p.items() if k != 'distance_from_center'} for p in places_to_cache]
-                        self.cache_service.save_crawled_data(cache_key, cache_data)
-                        print(f"         💾 캐시 저장: {len(cache_data)}개")
-                
-                except Exception as e:
-                    print(f"         ❌ Google Places 검색 실패 ({keyword}): {e}")
-            
-            # 새 검색 결과로 대체
-            if fresh_places:
-                filtered_places = fresh_places
-        
-        # 🆕 Step 4: 여전히 결과 부족하면 반경 확대 (2배)
-        if len(filtered_places) < 2:
-            print(f"      ⚠️ 결과 여전히 부족 ({len(filtered_places)}개) → 반경 {radius_km * 2}km로 확대")
-            
-            expanded_places = []
-            for keyword in keywords[:2]:
-                query = f"{city} {keyword}"
-                
-                try:
-                    google_results = await self.google_service.search_nearby_places(
-                        query=query,
-                        location=(center_lat, center_lng),
-                        radius=int(radius_km * 2000),  # 2배 확대
-                        language="ko"
-                    )
-                    print(f"         📊 확대 검색 결과: {len(google_results)}개")
-                    
-                    for item in google_results:
-                        lat = item.get('lat')
-                        lng = item.get('lng')
-                        
-                        if lat and lng and 33 <= lat <= 43 and 124 <= lng <= 132:
-                            distance = self.geo_filter.calculate_distance(
-                                center_lat, center_lng, lat, lng
-                            )
-                            
-                            # 2배 반경 이내만
-                            if distance <= radius_km * 2:
-                                place = {
-                                    "name": item.get('name', ''),
-                                    "address": item.get('address', ''),
-                                    "description": item.get('description', ''),
-                                    "category": item.get('category', ''),
-                                    "rating": item.get('rating', 0),
-                                    "lat": lat,
-                                    "lng": lng,
-                                    "distance_from_center": distance,
-                                    "google_info": item
-                                }
-                                expanded_places.append(place)
-                                print(f"            ✅ {place['name']} ({distance:.2f}km)")
-                
-                except Exception as e:
-                    print(f"         ❌ 확대 검색 실패: {e}")
-            
-            if expanded_places:
-                filtered_places.extend(expanded_places)
-                print(f"      ✅ 확대 검색으로 {len(expanded_places)}개 추가")
-        
-        # 거리순 정렬
-        filtered_places.sort(key=lambda x: x.get('distance_from_center', 999))
-        
-        # 중복 제거 (이름 기준)
-        seen_names = set()
-        unique_places = []
-        for place in filtered_places:
-            if place['name'] not in seen_names:
-                seen_names.add(place['name'])
-                unique_places.append(place)
-        
-        print(f"      ✅ 필터링 완료: {len(unique_places)}개 (최대 5개 반환)")
-        return unique_places[:5]  # 최대 5개
+            return filtered_by_ai
+        else:
+            print(f"      ✅ 결과: {len(places)}개 (AI 필터링 스킵)")
+            return places[:5]
+

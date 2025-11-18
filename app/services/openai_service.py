@@ -124,10 +124,22 @@ class OpenAIService:
                     {"role": "system", "content": "당신은 여행 스타일 분석 전문가입니다. 프롬프트를 분석하여 가장 적합한 여행 스타일을 파악합니다."},
                     {"role": "user", "content": analysis_prompt}
                 ],
-                max_completion_tokens=500  # 200 → 500으로 증가
+                max_completion_tokens=1000  # 200 → 500으로 증가
             )
             
             content = response.choices[0].message.content.strip()
+            
+            # JSON 코드 블록 제거
+            if content.startswith('```'):
+                content = content.split('```')[1]
+                if content.startswith('json'):
+                    content = content[4:]
+                content = content.strip()
+            
+            # 빈 응답 처리
+            if not content:
+                print(f"⚠️ AI 응답이 비어있음, 폴백 사용")
+                return self._analyze_travel_style_fallback(prompt)
             
             # JSON 파싱
             import json

@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 class CacheService:
     def __init__(self):
-        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
         try:
             self.redis_client = redis.from_url(redis_url, decode_responses=True)
             # 연결 테스트
