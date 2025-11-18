@@ -68,7 +68,7 @@ class AIScheduleFramer:
                     "place_type": "restaurant",
                     "purpose": "점심",
                     "search_keywords": ["한식", "현지맛집"],
-                    "search_radius_km": 2.0,
+                    "search_radius_km": 5.0,  # 2.0 → 5.0km
                     "priority": "high"
                 },
                 ...
@@ -115,13 +115,13 @@ class AIScheduleFramer:
         user_prompt = f"""
 {city} {days_count}일({start_time}-{end_time}) {travel_style}{weather_context}
 
-규칙: 11시 점심, 13:30 카페, 15-17시 관광, 18시 저녁, 20-22시 야간(선택). 유형 연속금지. 반경 5/2/3km.
+규칙: 11시 점심, 13:30 카페, 15-17시 관광, 18시 저녁, 20-22시 야간(선택). 유형 연속금지. 반경 넉넉하게 (관광7km, 맛집5km, 카페3km).
 
 **간결하게** JSON만 출력 (코드블록X, 설명X):
 {{
   "schedule_frame": [
-    {{"day":1,"time_slot":"09:00-11:00","place_type":"tourist_attraction","purpose":"오전 관광","search_keywords":["관광지","명소"],"search_radius_km":5.0,"priority":"high","expected_duration_minutes":120}},
-    {{"day":1,"time_slot":"11:00-13:00","place_type":"restaurant","purpose":"점심","search_keywords":["맛집"],"search_radius_km":2.0,"priority":"high","expected_duration_minutes":90}}
+    {{"day":1,"time_slot":"09:00-11:00","place_type":"tourist_attraction","purpose":"오전 관광","search_keywords":["관광지","명소"],"search_radius_km":7.0,"priority":"high","expected_duration_minutes":120}},
+    {{"day":1,"time_slot":"11:00-13:00","place_type":"restaurant","purpose":"점심","search_keywords":["맛집"],"search_radius_km":5.0,"priority":"high","expected_duration_minutes":90}}
   ]
 }}
 
@@ -278,7 +278,7 @@ class AIScheduleFramer:
                     "place_type": "tourist_attraction",
                     "purpose": "오전 관광",
                     "search_keywords": ["관광지", "명소"],
-                    "search_radius_km": 5.0,
+                    "search_radius_km": 7.0,  # 5.0 → 7.0km (관광지는 좀 멀어도 OK)
                     "priority": "high",
                     "expected_duration_minutes": 120
                 },
@@ -288,7 +288,7 @@ class AIScheduleFramer:
                     "place_type": "restaurant",
                     "purpose": "점심 식사",
                     "search_keywords": ["맛집", "식당"],
-                    "search_radius_km": 2.0,
+                    "search_radius_km": 5.0,  # 2.0 → 5.0km (좋은 맛집 더 찾기)
                     "priority": "high",
                     "expected_duration_minutes": 90
                 },
@@ -298,7 +298,7 @@ class AIScheduleFramer:
                     "place_type": "cafe",
                     "purpose": "카페 휴식",
                     "search_keywords": ["카페", "디저트"],
-                    "search_radius_km": 1.0,
+                    "search_radius_km": 3.0,  # 1.0 → 3.0km (카페도 조금 여유있게)
                     "priority": "medium",
                     "expected_duration_minutes": 60
                 },
@@ -308,7 +308,7 @@ class AIScheduleFramer:
                     "place_type": "tourist_attraction",
                     "purpose": "오후 관광",
                     "search_keywords": ["관광지", "공원"],
-                    "search_radius_km": 3.0,
+                    "search_radius_km": 5.0,  # 3.0 → 5.0km (여유있게)
                     "priority": "high",
                     "expected_duration_minutes": 120
                 },
@@ -318,7 +318,7 @@ class AIScheduleFramer:
                     "place_type": "restaurant",
                     "purpose": "저녁 식사",
                     "search_keywords": ["맛집", "저녁식사"],
-                    "search_radius_km": 2.0,
+                    "search_radius_km": 5.0,  # 2.0 → 5.0km (좋은 맛집 더 찾기)
                     "priority": "high",
                     "expected_duration_minutes": 90
                 },
@@ -328,7 +328,7 @@ class AIScheduleFramer:
                     "place_type": "bar",
                     "purpose": "야경/술집",
                     "search_keywords": ["바", "펍", "야경명소"],
-                    "search_radius_km": 3.0,
+                    "search_radius_km": 5.0,  # 3.0 → 5.0km (야경명소는 멀 수 있음)
                     "priority": "medium",
                     "expected_duration_minutes": 120
                 }

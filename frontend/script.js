@@ -937,174 +937,7 @@ function updateMapForDay(dayData) {
     }
 }
 
-// 🆕 경로 보기 함수 (일정 항목별)
-async function showRouteToNext(index, day) {
-    console.log(`🗺️ 경로 보기: Day ${day}, Index ${index}`);
-    console.log(`   dayGroups 전체:`, dayGroups);
-    
-    const dayData = dayGroups[day] || [];
-    console.log(`   ${day}일차 데이터 (${dayData.length}개):`, dayData);
-    
-    if (!dayData || dayData.length === 0) {
-        alert('해당 날짜의 일정이 없습니다.');
-        return;
-    }
-    
-    const currentPlace = dayData[index];
-    console.log(`   현재 장소 (index ${index}):`, currentPlace);
-    
-    if (!currentPlace || !currentPlace.lat || !currentPlace.lng) {
-        alert('장소 정보가 없습니다.');
-        return;
-    }
-    
-    let startLat, startLng, startName;
-    
-    // 🔍 출발지 결정 로직
-    if (index === 0) {
-        // 각 날의 첫 번째 장소
-        if (day === 1) {
-            // 1일차 첫 번째: 현재 장소의 주소에서 도시 추출
-            const currentCity = currentPlace.address || '';
-            if (currentCity.includes('순천') || currentCity.includes('전남')) {
-                // 순천이면 순천역을 출발지로
-                startLat = 34.9506;
-                startLng = 127.4877;
-                startName = "순천역";
-            } else {
-                // 원래 출발지 사용
-                startLat = window.tripStartLat || currentPlace.lat;
-                startLng = window.tripStartLng || currentPlace.lng;
-                startName = window.tripStartLocation || currentPlace.address?.split(' ')[0] || "출발지";
-            }
-            console.log(`   📍 1일차 출발지: ${startName} (${startLat}, ${startLng})`);
-        } else {
-            // 2일차 이상 첫 번째: 전날 마지막 장소 사용
-            const prevDayData = dayGroups[day - 1] || [];
-            console.log(`   전날 (${day - 1}일차) 데이터:`, prevDayData);
-            
-            if (prevDayData.length > 0) {
-                const prevLastPlace = prevDayData[prevDayData.length - 1];
-                console.log(`   전날 마지막 장소:`, prevLastPlace);
-                
-                startLat = prevLastPlace.lat;
-                startLng = prevLastPlace.lng;
-                startName = prevLastPlace.place_name || prevLastPlace.name || "전날 마지막 장소";
-                console.log(`   📍 ${day}일차 출발지 (전날 마지막): ${startName} (${startLat}, ${startLng})`);
-            } else {
-                // Fallback: 현재 장소가 있는 도시의 중심
-                startLat = currentPlace.lat;
-                startLng = currentPlace.lng;
-                startName = "현재 위치 근처";
-                console.log(`   ⚠️ 전날 데이터 없음, 현재 위치 사용: ${startName}`);
-            }
-        }
-    } else {
-        // 같은 날 두 번째 이상: 이전 장소 사용
-        const prevPlace = dayData[index - 1];
-        startLat = prevPlace.lat;
-        startLng = prevPlace.lng;
-        startName = prevPlace.place_name || prevPlace.name || "이전 장소";
-        console.log(`   📍 이전 장소 출발: ${startName}`);
-    }
-    
-    const destLat = currentPlace.lat;
-    const destLng = currentPlace.lng;
-    const destName = currentPlace.place_name || currentPlace.name || "목적지";
-    const destAddress = currentPlace.address || '';
-    
-    // 🆕 좌표 기반 지역 판별 함수
-    function getRegionFromCoords(lat, lng) {
-        if (lat >= 37.4 && lat <= 37.7 && lng >= 126.8 && lng <= 127.2) {
-            return '서울';
-        } else if (lat >= 34.9 && lat <= 35.0 && lng >= 127.4 && lng <= 127.6) {
-            return '순천';
-        } else if (lat >= 34.7 && lat <= 34.8 && lng >= 127.6 && lng <= 127.8) {
-            return '여수';
-        } else if (lat >= 37.3 && lat <= 37.6 && lng >= 126.6 && lng <= 126.8) {
-            return '인천';
-        } else {
-            return '기타';
-        }
-    }
-    
-    const startRegion = getRegionFromCoords(startLat, startLng);
-    const destRegion = getRegionFromCoords(destLat, destLng);
-    
-    console.log(`   ✅ 최종 출발: ${startName}`);
-    console.log(`      좌표: (${startLat}, ${startLng})`);
-    console.log(`      📍 지역 판별: ${startRegion}`);
-    console.log(`   ✅ 최종 도착: ${destName}`);
-    console.log(`      좌표: (${destLat}, ${destLng})`);
-    console.log(`      주소: ${destAddress}`);
-    console.log(`      📍 지역 판별: ${destRegion}`);
-    
-    // 🆕 지역 불일치 경고 (콘솔만)
-    if (startRegion === '서울' && destRegion === '순천') {
-        console.warn(`   ⚠️⚠️⚠️ 경고: 서울 → 순천으로 이동 (약 300km!)`);
-    } else if (startRegion === '순천' && destRegion === '서울') {
-        console.warn(`   ⚠️⚠️⚠️ 경고: 순천 → 서울로 이동 (약 300km!)`);
-    } else if (startRegion !== destRegion && startRegion !== '기타' && destRegion !== '기타') {
-        console.warn(`   ⚠️ 지역 간 이동: ${startRegion} → ${destRegion}`);
-    }
-    
-    // 좌표 유효성 검증
-    if (!startLat || !startLng || !destLat || !destLng) {
-        alert('좌표 정보가 올바르지 않습니다.');
-        console.error('   ❌ 좌표 누락:', { startLat, startLng, destLat, destLng });
-        return;
-    }
-    
-    // Google Maps에서 경로 열기
-    const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${startLat},${startLng}&destination=${destLat},${destLng}&travelmode=transit`;
-    window.open(googleMapsUrl, '_blank');
-    
-    // 지도에 경로 표시
-    if (map && directionsService) {
-        // 거리 계산
-        const distance = calculateDistance(startLat, startLng, destLat, destLng);
-        console.log(`   📏 직선 거리: ${distance.toFixed(2)}km`);
-        
-        // 1km 미만이면 도보, 아니면 대중교통
-        const travelMode = distance < 1.0 ? google.maps.TravelMode.WALKING : google.maps.TravelMode.TRANSIT;
-        console.log(`   🚶 이동 수단: ${travelMode}`);
-        
-        const request = {
-            origin: new google.maps.LatLng(startLat, startLng),
-            destination: new google.maps.LatLng(destLat, destLng),
-            travelMode: travelMode
-        };
-        
-        directionsService.route(request, (result, status) => {
-            if (status === 'OK') {
-                // 기존 경로 제거
-                if (directionsRenderer) {
-                    directionsRenderer.setDirections({routes: []});
-                }
-                
-                const routeRenderer = new google.maps.DirectionsRenderer({
-                    directions: result,
-                    suppressMarkers: true,
-                    polylineOptions: {
-                        strokeColor: travelMode === google.maps.TravelMode.WALKING ? '#34A853' : '#4285F4',
-                        strokeWeight: 4,
-                        strokeOpacity: 0.8
-                    }
-                });
-                routeRenderer.setMap(map);
-                console.log('   ✅ 경로 표시 성공');
-            } else {
-                console.warn(`   ❌ 경로 표시 실패 (${status}), 점선으로 표시`);
-                // 실패 시 점선 표시
-                const places = [
-                    { lat: startLat, lng: startLng, name: startName },
-                    { lat: destLat, lng: destLng, name: destName }
-                ];
-                drawStraightPath(places, travelMode);
-            }
-        });
-    }
-}
+// 🗑️ 구버전 함수 제거됨 (1803번 줄에 최신 버전이 있음)
 
 // 거리 계산 헬퍼 함수
 function calculateDistance(lat1, lng1, lat2, lng2) {
@@ -1786,25 +1619,53 @@ async function showRouteToNext(currentIndex, day) {
     let origin, destination;
     
     if (currentIndex === 0) {
-        // 1번 장소: 출발지 → 1번 장소
-        // UI에서 설정한 출발지 정보 가져오기
-        const startLocationName = window.tripStartLocation || "서울역";
-        const startLat = window.tripStartLat || 37.5547;
-        const startLng = window.tripStartLng || 126.9707;
-        
-        console.log('📍 출발지:', { name: startLocationName, lat: startLat, lng: startLng });
-        
-        origin = { 
-            place_name: startLocationName, 
-            name: startLocationName,
-            location: startLocationName,
-            address: startLocationName,
-            lat: startLat, 
-            lng: startLng 
-        };
+        // 🆕 이 날의 첫 번째 장소: 전날 마지막 장소 또는 최초 출발지 사용
+        if (day === 1) {
+            // 1일차 첫 장소: 최초 출발지 사용
+            const startLocationName = window.tripStartLocation || "서울역";
+            const startLat = window.tripStartLat || 37.5547;
+            const startLng = window.tripStartLng || 126.9707;
+            
+            console.log('📍 1일차 출발지:', { name: startLocationName, lat: startLat, lng: startLng });
+            
+            origin = { 
+                place_name: startLocationName, 
+                name: startLocationName,
+                location: startLocationName,
+                address: startLocationName,
+                lat: startLat, 
+                lng: startLng 
+            };
+        } else {
+            // 2일차+ 첫 장소: 전날 마지막 장소를 출발지로 사용
+            const previousDay = day - 1;
+            const previousDayData = dayGroups[previousDay];
+            
+            if (previousDayData && previousDayData.length > 0) {
+                // 전날 마지막 장소
+                origin = previousDayData[previousDayData.length - 1];
+                console.log(`📍 ${day}일차 출발지: ${previousDay}일차 마지막 장소`, origin.place_name || origin.name);
+            } else {
+                // 전날 데이터가 없으면 최초 출발지 사용
+                const startLocationName = window.tripStartLocation || "서울역";
+                const startLat = window.tripStartLat || 37.5547;
+                const startLng = window.tripStartLng || 126.9707;
+                
+                console.log('⚠️ 전날 데이터 없음, 최초 출발지 사용');
+                
+                origin = { 
+                    place_name: startLocationName, 
+                    name: startLocationName,
+                    location: startLocationName,
+                    address: startLocationName,
+                    lat: startLat, 
+                    lng: startLng 
+                };
+            }
+        }
         destination = dayData[0];
     } else {
-        // 2번 이후: 이전 장소 → 현재 장소
+        // 같은 날 2번째 이후: 이전 장소 → 현재 장소
         origin = dayData[currentIndex - 1];
         destination = dayData[currentIndex];
     }
