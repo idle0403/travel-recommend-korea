@@ -286,7 +286,7 @@ class AIScheduleFramer:
                     "place_type": "tourist_attraction",
                     "purpose": "오전 관광",
                     "search_keywords": ["관광지", "명소"],
-                    "search_radius_km": 5.0,  # 🚗 동선 최적화: 7.0 → 5.0km
+                    "search_radius_km": 5.0 if day == 1 else 3.0,  # 1일차만 5km, 이후 3km
                     "priority": "high",
                     "expected_duration_minutes": 120
                 },
@@ -296,7 +296,7 @@ class AIScheduleFramer:
                     "place_type": "restaurant",
                     "purpose": "점심 식사",
                     "search_keywords": ["맛집", "식당"],
-                    "search_radius_km": 3.0,  # 🚗 동선 최적화: 5.0 → 3.0km
+                    "search_radius_km": 2.0,  # 🎯 타이트하게: 3.0 → 2.0km
                     "priority": "high",
                     "expected_duration_minutes": 90
                 },
@@ -306,7 +306,7 @@ class AIScheduleFramer:
                     "place_type": "cafe",
                     "purpose": "카페 휴식",
                     "search_keywords": ["카페", "디저트"],
-                    "search_radius_km": 2.0,  # 🚗 동선 최적화: 3.0 → 2.0km
+                    "search_radius_km": 1.5,  # 🎯 타이트하게: 2.0 → 1.5km
                     "priority": "medium",
                     "expected_duration_minutes": 60
                 },
@@ -316,7 +316,7 @@ class AIScheduleFramer:
                     "place_type": "tourist_attraction",
                     "purpose": "오후 관광",
                     "search_keywords": ["관광지", "공원"],
-                    "search_radius_km": 4.0,  # 🚗 동선 최적화: 5.0 → 4.0km
+                    "search_radius_km": 3.0,  # 🎯 타이트하게: 4.0 → 3.0km
                     "priority": "high",
                     "expected_duration_minutes": 120
                 },
@@ -326,7 +326,7 @@ class AIScheduleFramer:
                     "place_type": "restaurant",
                     "purpose": "저녁 식사",
                     "search_keywords": ["맛집", "저녁식사"],
-                    "search_radius_km": 3.0,  # 🚗 동선 최적화: 5.0 → 3.0km
+                    "search_radius_km": 2.0,  # 🎯 타이트하게: 3.0 → 2.0km
                     "priority": "high",
                     "expected_duration_minutes": 90
                 },
@@ -336,7 +336,7 @@ class AIScheduleFramer:
                     "place_type": "bar",
                     "purpose": "야경/술집",
                     "search_keywords": ["바", "펍", "야경명소"],
-                    "search_radius_km": 4.0,  # 🚗 동선 최적화: 5.0 → 4.0km
+                    "search_radius_km": 3.0,  # 🎯 타이트하게: 4.0 → 3.0km
                     "priority": "medium",
                     "expected_duration_minutes": 120
                 }

@@ -638,19 +638,20 @@ class EnhancedPlaceDiscoveryService:
 **각 시간대마다 가장 적합한 장소 1개씩** 선택해주세요.
 
 **🎯 선별 기준 (우선순위)**:
-1. **동선 최적화 (최우선!)**: 
-   - 이전 시간대에서 선택한 장소와 **3km 이내**인 곳 우선
-   - **5km 이상**은 특별한 이유 없으면 제외
-   - 거리가 가까울수록 높은 점수
+1. **동선 최적화 (최우선! 절대 엄수!)**: 
+   - 이전 장소에서 **1.5km 이내**: ⭐⭐⭐⭐⭐ 최우선 선택!
+   - **1.5-2.5km**: ⭐⭐⭐⭐ 좋음
+   - **2.5-3.5km**: ⭐⭐⭐ 허용 가능
+   - **3.5km 초과**: ⭐ 첫 시간대의 대표 랜드마크가 아니면 절대 제외!
+   - 💡 1일차 첫 시간대(오전 관광)만 예외: 대표 랜드마크라면 거리 무관
    
-2. **방향 일관성 (매우 중요!)**: 
-   - ❌ **왔다갔다 하는 동선 금지!** 
-     예) A → C(동쪽 5km) → B(서쪽 4km) ← 다시 돌아옴!
-   - ✅ **한 방향으로 순차적 이동**
-     예) A → B(동쪽 2km) → C(동쪽 3km) ← 계속 같은 방향!
-   - 괄호 안의 방향 정보를 보고 일관된 방향 선택
-   - 되돌아가는(backtracking) 동선은 최대한 회피
-   - 한 방향으로 쭉 가거나, 서서히 원을 그리며 돌아오는 형태가 이상적
+2. **방향 일관성 (매우 중요! 철저히 지킬 것!)**: 
+   - ❌ **절대 금지**: 왔다갔다 하는 동선!
+     나쁜 예) A → C(동쪽 3km) → B(서쪽 2km) ← 다시 서쪽으로!
+   - ✅ **필수**: 한 방향으로 순차적 이동 또는 시계방향/반시계방향 순회
+     좋은 예) A → B(동쪽 1.5km) → C(동쪽 2km) → D(남동 1.8km) ← 같은 방향!
+   - 괄호 안 방향 정보를 보고 **연속된 방향만** 선택
+   - 180도 반대 방향(backtracking)은 절대 금지!
    
 3. 시간대와 목적에 맞는 장소
 4. 여행지로서 가치있는 곳 (동네 시설, 일반 공원 제외)
@@ -779,6 +780,7 @@ class EnhancedPlaceDiscoveryService:
                         
                         # 동선 검증: 이전 장소와의 거리 계산
                         distance_str = ""
+                        warning_emoji = ""
                         if prev_selected_location:
                             lat, lng = place.get('lat'), place.get('lng')
                             if lat and lng:
@@ -791,7 +793,18 @@ class EnhancedPlaceDiscoveryService:
                                 c = 2 * atan2(sqrt(a), sqrt(1-a))
                                 distance = R * c
                                 total_distance += distance
-                                distance_str = f" [이전 장소로부터 {distance:.1f}km]"
+                                
+                                # 거리 기반 이모티콘 표시
+                                if distance <= 1.5:
+                                    warning_emoji = "✅"  # 이상적
+                                elif distance <= 2.5:
+                                    warning_emoji = "🟢"  # 좋음
+                                elif distance <= 3.5:
+                                    warning_emoji = "🟡"  # 허용
+                                else:
+                                    warning_emoji = "🔴"  # 너무 멀음!
+                                
+                                distance_str = f" {warning_emoji} [이전 장소로부터 {distance:.1f}km]"
                         
                         print(f"   [{idx}] {place_name}{distance_str} - {reason}")
                         
