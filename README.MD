@@ -850,6 +850,71 @@ function createTransportButtons(distance) {
 
 ## 🆕 2025-11-18 최신 업데이트
 
+### 🏛️ AI 기반 필수 랜드마크 우선 추천 (NEW!)
+
+**문제점**:
+- 순천 여행인데 "순천만국가정원"이 추천에서 빠지는 치명적 문제 발생
+- 도시별 대표 관광지를 정적 DB로 관리하기엔 전세계 도시가 너무 많음
+
+**해결책: AI에게 실시간으로 물어보기**
+
+```python
+# enhanced_place_discovery_service.py (606-688번 줄)
+
+async def get_city_must_visit_landmarks(self, city: str) -> List[str]:
+    """
+    🆕 AI를 활용하여 도시별 필수 방문 랜드마크 추출 (Redis 캐싱)
+    
+    예시:
+    - 순천 → ["순천만국가정원", "순천만습지", "낙안읍성"]
+    - 교토 → ["기요미즈데라", "후시미이나리", "금각사"]
+    - 파리 → ["에펠탑", "루브르박물관", "개선문"]
+    """
+    # Step 1: Redis 캐시 확인 (30일 저장)
+    cached = ai_cache.get_cached_ai_response('must_visit_landmarks', city)
+    if cached:
+        return cached.get('landmarks', [])
+    
+    # Step 2: OpenAI GPT-5에게 물어보기
+    prompt = f"""
+{city}의 대표 관광지/랜드마크를 3-5개 추천해주세요.
+**조건**: 반드시 가봐야 하는 곳, 정확한 장소명
+**응답 형식 (JSON만)**:
+{{"landmarks": ["랜드마크1", "랜드마크2", "랜드마크3"]}}
+"""
+    
+    # Step 3: 관광지 검색 시 자동으로 우선 검색
+    if place_type == 'tourist_attraction':
+        landmarks = await self.get_city_must_visit_landmarks(city)
+        enhanced_keywords = landmarks + keywords  # 랜드마크 우선!
+```
+
+**장점**:
+- ✅ **전세계 모든 도시** 대응 가능 (정적 DB 불필요)
+- ✅ **Redis 캐싱**으로 같은 도시는 다시 물어보지 않음
+- ✅ **순천 → 순천만국가정원 자동 추천** 보장
+- ✅ **AI가 최신 관광 트렌드 반영**
+
+**효과**:
+```
+🏛️ 순천 필수 랜드마크 (AI):
+   랜드마크: 순천만국가정원, 순천만습지, 낙안읍성
+   설명: 순천의 3대 대표 관광지로 자연과 역사를 모두 경험할 수 있습니다.
+
+🔍 검색 순서:
+1️⃣ 순천만국가정원 (AI 최우선) - 🏛️ 거리 필터링 우회!
+2️⃣ 순천만습지 (AI 최우선) - 🏛️ 거리 필터링 우회!
+3️⃣ 낙안읍성 (AI 최우선) - 🏛️ 거리 필터링 우회!
+4️⃣ 관광지 (일반 키워드)
+
+📏 거리 필터링 규칙:
+- 일반 장소: 설정된 반경 내만 (예: 관광지 7km)
+- 🏛️ AI 랜드마크: 최대 30km까지 허용 (거리 무관!)
+  → 순천만국가정원이 10km 떨어져도 무조건 포함 ✅
+```
+
+---
+
 ### 📏 검색 반경 확대: 더 많은 좋은 장소 추천
 
 **개선 배경**: 기존 2km 반경은 너무 타이트해서 좋은 맛집/카페들이 많이 제외됨

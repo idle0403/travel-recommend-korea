@@ -603,6 +603,90 @@ class EnhancedPlaceDiscoveryService:
         
         return is_sufficient
     
+    async def get_city_must_visit_landmarks(self, city: str) -> List[str]:
+        """
+        🆕 AI를 활용하여 도시별 필수 방문 랜드마크 추출 (Redis 캐싱 적용)
+        
+        Args:
+            city: 도시명 (예: "순천", "교토", "파리")
+        
+        Returns:
+            필수 랜드마크 리스트 (예: ["순천만국가정원", "순천만습지", "낙안읍성"])
+        """
+        # Step 1: AI 캐시 확인
+        from app.services.ai_cache_service import get_ai_cache_service
+        ai_cache = get_ai_cache_service()
+        
+        cached_result = ai_cache.get_cached_ai_response('must_visit_landmarks', city)
+        
+        if cached_result:
+            landmarks = cached_result.get('landmarks', [])
+            print(f"\n🏛️ {city} 필수 랜드마크 (캐시): {', '.join(landmarks)}")
+            return landmarks
+        
+        # Step 2: OpenAI API 호출
+        try:
+            from openai import AsyncOpenAI
+            import os
+            import json
+            
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                print(f"   ℹ️ OpenAI API 키 없음 → 일반 검색 사용")
+                return []
+            
+            client = AsyncOpenAI(api_key=api_key)
+            
+            prompt = f"""
+{city}의 대표 관광지/랜드마크를 3-5개 추천해주세요.
+
+**조건**:
+1. 이 도시를 방문하면 **반드시 가봐야 하는** 곳
+2. 관광객들이 가장 많이 찾는 명소
+3. 도시를 대표하는 상징적인 장소
+4. 정확한 장소명으로 응답
+
+**응답 형식 (JSON만)**:
+{{
+  "landmarks": ["랜드마크1", "랜드마크2", "랜드마크3"],
+  "description": "1문장 설명"
+}}
+
+예시:
+- 순천 → {{"landmarks": ["순천만국가정원", "순천만습지", "낙안읍성"]}}
+- 도쿄 → {{"landmarks": ["도쿄타워", "센소지", "시부야크로싱"]}}
+- 파리 → {{"landmarks": ["에펠탑", "루브르박물관", "개선문"]}}
+
+**중요**: JSON만 응답하세요."""
+            
+            response = await client.chat.completions.create(
+                model="gpt-5",
+                messages=[
+                    {"role": "system", "content": "당신은 전세계 관광 전문가입니다. 각 도시의 대표 랜드마크를 추천합니다."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_completion_tokens=500
+            )
+            
+            content = response.choices[0].message.content.strip()
+            result = json.loads(content)
+            
+            landmarks = result.get('landmarks', [])
+            description = result.get('description', '')
+            
+            print(f"\n🏛️ {city} 필수 랜드마크 (AI):")
+            print(f"   랜드마크: {', '.join(landmarks)}")
+            print(f"   설명: {description}")
+            
+            # Step 3: Redis에 캐싱 (30일)
+            ai_cache.save_ai_response('must_visit_landmarks', city, result)
+            
+            return landmarks
+            
+        except Exception as e:
+            print(f"⚠️ AI 랜드마크 추출 실패: {e}")
+            return []
+    
     async def analyze_nearby_regions_with_ai(
         self,
         city: str,
@@ -967,6 +1051,7 @@ class EnhancedPlaceDiscoveryService:
         특정 위치 근처에서 키워드로 장소 검색
         
         **개선된 로직**:
+        0. 🆕 관광지인 경우: AI에게 필수 랜드마크 먼저 물어보기
         1. 캐시가 있으면 먼저 확인
         2. 거리 필터링 적용
         3. 결과가 부족하면 캐시 무시하고 새로 검색
@@ -974,9 +1059,22 @@ class EnhancedPlaceDiscoveryService:
         all_places = []
         need_fresh_search = False
         
+        # 🆕 Step 0: 관광지인 경우 AI에게 필수 랜드마크 물어보기
+        enhanced_keywords = keywords.copy()
+        landmark_keywords = []  # AI 랜드마크 키워드 추적
+        
+        if place_type == 'tourist_attraction':
+            landmarks = await self.get_city_must_visit_landmarks(city)
+            if landmarks:
+                print(f"   🏛️ AI 추천 필수 랜드마크 우선 검색: {landmarks}")
+                landmark_keywords = landmarks  # 랜드마크 키워드 저장
+                # 랜드마크를 키워드 앞에 추가 (우선순위 높임)
+                enhanced_keywords = landmarks + enhanced_keywords
+        
         # 각 키워드로 검색
-        for keyword in keywords[:2]:  # 최대 2개 키워드만 사용
+        for keyword in enhanced_keywords[:4]:  # 최대 4개 (랜드마크 3개 + 일반 키워드 1개)
             query = f"{city} {keyword}"
+            is_landmark = keyword in landmark_keywords  # 랜드마크 여부 체크
             
             # Step 1: 캐시 확인
             cache_key = f"google_{self.cache_service.generate_search_key(city, keyword)}"
@@ -984,16 +1082,24 @@ class EnhancedPlaceDiscoveryService:
             
             if cached:
                 print(f"   ✅ Redis 캐시 히트: {cache_key}")
+                # 🆕 랜드마크 플래그 추가
+                for place in cached:
+                    if is_landmark:
+                        place['is_must_visit_landmark'] = True
                 all_places.extend(cached)
             else:
                 need_fresh_search = True
                 print(f"   ⚠️ Redis 캐시 미스: {cache_key}")
         
-        # Step 2: 거리 필터링 (캐시 데이터든 새 데이터든 무조건 적용)
-        print(f"      🔍 거리 필터링 시작: {len(all_places)}개 → 반경 {radius_km}km 이내")
+        # Step 2: 거리 필터링 (🆕 AI 랜드마크는 거리 관계없이 포함!)
+        print(f"      🔍 거리 필터링 시작: {len(all_places)}개")
+        print(f"         일반 장소: 반경 {radius_km}km 이내")
+        print(f"         🏛️ AI 랜드마크: 최대 30km 허용 (거리 무관)")
         print(f"         중심: ({center_lat:.4f}, {center_lng:.4f})")
         
         filtered_places = []
+        MAX_LANDMARK_DISTANCE = 30.0  # 랜드마크 최대 거리 (km)
+        
         for place in all_places:
             if not place.get('lat') or not place.get('lng'):
                 continue
@@ -1002,24 +1108,40 @@ class EnhancedPlaceDiscoveryService:
                 center_lat, center_lng,
                 place['lat'], place['lng']
             )
+            place['distance_from_center'] = distance
             
-            if distance <= radius_km:
-                place['distance_from_center'] = distance
-                filtered_places.append(place)
+            is_landmark = place.get('is_must_visit_landmark', False)
+            
+            # 거리 필터링 로직
+            if is_landmark:
+                # 랜드마크는 30km까지 허용
+                if distance <= MAX_LANDMARK_DISTANCE:
+                    print(f"         🏛️ 랜드마크 포함: {place.get('name')} ({distance:.2f}km)")
+                    filtered_places.append(place)
+                else:
+                    print(f"         ⚠️ 랜드마크지만 너무 먼 거리: {place.get('name')} ({distance:.2f}km > 30km)")
+            else:
+                # 일반 장소는 설정된 반경 내만
+                if distance <= radius_km:
+                    filtered_places.append(place)
         
         # Step 3: 결과가 부족하면 새로 검색 (캐시가 있어도!)
         if len(filtered_places) < 3 or need_fresh_search:
             if len(filtered_places) < 3 and not need_fresh_search:
                 print(f"      ⚠️ 캐시 결과 부족 ({len(filtered_places)}개) → 새로 검색")
             
-            # 새로 검색
+            # 새로 검색 (🆕 enhanced_keywords 사용!)
             fresh_places = []
-            for keyword in keywords[:2]:
+            for keyword in enhanced_keywords[:4]:
                 query = f"{city} {keyword}"
+                is_landmark = keyword in landmark_keywords  # 🆕 랜드마크 여부 체크
                 cache_key = f"google_{self.cache_service.generate_search_key(city, keyword)}"
                 
                 try:
-                    print(f"         🔍 Google Places 검색: '{query}'")
+                    if is_landmark:
+                        print(f"         🔍 Google Places 검색 [🏛️ 필수 랜드마크]: '{query}'")
+                    else:
+                        print(f"         🔍 Google Places 검색: '{query}'")
                     print(f"            📍 검색 중심: ({center_lat:.4f}, {center_lng:.4f}) - {city}")
                     print(f"            📏 검색 반경: {radius_km}km ({int(radius_km * 1000)}m)")
                     
@@ -1075,20 +1197,33 @@ class EnhancedPlaceDiscoveryService:
                             "google_info": item
                         }
                         
+                        # 🆕 랜드마크 플래그 추가
+                        if is_landmark:
+                            place['is_must_visit_landmark'] = True
+                        
                         if place['lat'] and place['lng']:
                             # 거리 계산
                             distance = self.geo_filter.calculate_distance(
                                 center_lat, center_lng,
                                 place['lat'], place['lng']
                             )
+                            place['distance_from_center'] = distance
                             
-                            if distance <= radius_km:
-                                place['distance_from_center'] = distance
+                            # 🆕 랜드마크는 30km까지, 일반은 radius_km까지
+                            max_distance = MAX_LANDMARK_DISTANCE if is_landmark else radius_km
+                            
+                            if distance <= max_distance:
                                 fresh_places.append(place)
                                 places_to_cache.append(place)
-                                print(f"               ✅ 채택! 거리: {distance:.2f}km")
+                                if is_landmark:
+                                    print(f"               ✅ 채택! [🏛️ 필수 랜드마크] 거리: {distance:.2f}km")
+                                else:
+                                    print(f"               ✅ 채택! 거리: {distance:.2f}km")
                             else:
-                                print(f"               ❌ 거리 초과: {distance:.2f}km (>{radius_km}km)")
+                                if is_landmark:
+                                    print(f"               ❌ 거리 초과: {distance:.2f}km (랜드마크 최대 {MAX_LANDMARK_DISTANCE}km)")
+                                else:
+                                    print(f"               ❌ 거리 초과: {distance:.2f}km (>{radius_km}km)")
                     
                     # 캐시 저장 (필터링 전 전체 데이터)
                     if places_to_cache:
