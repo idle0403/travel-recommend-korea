@@ -108,7 +108,14 @@ class AIScheduleFramer:
         # AI 프롬프트 생성
         system_prompt = """당신은 여행 일정 전문가입니다.
 사용자의 여행 요청을 분석하여 시간대별 활동 계획의 "틀"을 생성합니다.
-실제 장소명은 제외하고, 각 시간대에 어떤 유형의 장소를 방문해야 할지만 결정합니다."""
+실제 장소명은 제외하고, 각 시간대에 어떤 유형의 장소를 방문해야 할지만 결정합니다.
+
+**🚫 절대 사용하면 안 되는 place_type**:
+- spa, hot_spring_spa, sauna, jjimjilbang (찜질방/사우나/목욕탕 절대 제외)
+- gym, fitness_center (동네 체육관 제외)
+
+**✅ 사용 가능한 place_type**:
+- tourist_attraction (관광지), restaurant (맛집), cafe (카페), bar (바/술집), night_view (야경)"""
 
         # 🆕 프롬프트 초간소화 + "간결하게" 지시 추가 (토큰 대폭 절약)
         weather_context = f" 날씨:{weather_info}" if weather_info else ""
@@ -116,6 +123,7 @@ class AIScheduleFramer:
 {city} {days_count}일({start_time}-{end_time}) {travel_style}{weather_context}
 
 규칙: 11시 점심, 13:30 카페, 15-17시 관광, 18시 저녁, 20-22시 야간(선택). 유형 연속금지. 반경 넉넉하게 (관광7km, 맛집5km, 카페3km).
+🚫 찜질방/사우나/스파 절대 제외!
 
 **간결하게** JSON만 출력 (코드블록X, 설명X):
 {{
@@ -278,7 +286,7 @@ class AIScheduleFramer:
                     "place_type": "tourist_attraction",
                     "purpose": "오전 관광",
                     "search_keywords": ["관광지", "명소"],
-                    "search_radius_km": 7.0,  # 5.0 → 7.0km (관광지는 좀 멀어도 OK)
+                    "search_radius_km": 5.0,  # 🚗 동선 최적화: 7.0 → 5.0km
                     "priority": "high",
                     "expected_duration_minutes": 120
                 },
@@ -288,7 +296,7 @@ class AIScheduleFramer:
                     "place_type": "restaurant",
                     "purpose": "점심 식사",
                     "search_keywords": ["맛집", "식당"],
-                    "search_radius_km": 5.0,  # 2.0 → 5.0km (좋은 맛집 더 찾기)
+                    "search_radius_km": 3.0,  # 🚗 동선 최적화: 5.0 → 3.0km
                     "priority": "high",
                     "expected_duration_minutes": 90
                 },
@@ -298,7 +306,7 @@ class AIScheduleFramer:
                     "place_type": "cafe",
                     "purpose": "카페 휴식",
                     "search_keywords": ["카페", "디저트"],
-                    "search_radius_km": 3.0,  # 1.0 → 3.0km (카페도 조금 여유있게)
+                    "search_radius_km": 2.0,  # 🚗 동선 최적화: 3.0 → 2.0km
                     "priority": "medium",
                     "expected_duration_minutes": 60
                 },
@@ -308,7 +316,7 @@ class AIScheduleFramer:
                     "place_type": "tourist_attraction",
                     "purpose": "오후 관광",
                     "search_keywords": ["관광지", "공원"],
-                    "search_radius_km": 5.0,  # 3.0 → 5.0km (여유있게)
+                    "search_radius_km": 4.0,  # 🚗 동선 최적화: 5.0 → 4.0km
                     "priority": "high",
                     "expected_duration_minutes": 120
                 },
@@ -318,7 +326,7 @@ class AIScheduleFramer:
                     "place_type": "restaurant",
                     "purpose": "저녁 식사",
                     "search_keywords": ["맛집", "저녁식사"],
-                    "search_radius_km": 5.0,  # 2.0 → 5.0km (좋은 맛집 더 찾기)
+                    "search_radius_km": 3.0,  # 🚗 동선 최적화: 5.0 → 3.0km
                     "priority": "high",
                     "expected_duration_minutes": 90
                 },
@@ -328,7 +336,7 @@ class AIScheduleFramer:
                     "place_type": "bar",
                     "purpose": "야경/술집",
                     "search_keywords": ["바", "펍", "야경명소"],
-                    "search_radius_km": 5.0,  # 3.0 → 5.0km (야경명소는 멀 수 있음)
+                    "search_radius_km": 4.0,  # 🚗 동선 최적화: 5.0 → 4.0km
                     "priority": "medium",
                     "expected_duration_minutes": 120
                 }

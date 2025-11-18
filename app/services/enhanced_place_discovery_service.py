@@ -632,30 +632,95 @@ class EnhancedPlaceDiscoveryService:
             
             client = AsyncOpenAI(api_key=api_key)
             
-            # 프롬프트 생성: 전체 스케줄과 모든 장소 목록
+            # 프롬프트 생성: 전체 스케줄과 모든 장소 목록 + 위치 정보
             prompt = f"""당신은 {city} 여행 큐레이터입니다.
 아래는 여행 일정과 각 시간대에 검색된 장소 목록입니다.
 **각 시간대마다 가장 적합한 장소 1개씩** 선택해주세요.
 
-**선별 기준**:
-1. 시간대와 목적에 맞는 장소
-2. 여행지로서 가치있는 곳 (동네 시설 제외)
-3. 체인점 제외 (스타벅스, 맥도날드 등)
-4. 전체 동선 최적화 고려
+**🎯 선별 기준 (우선순위)**:
+1. **동선 최적화 (최우선!)**: 
+   - 이전 시간대에서 선택한 장소와 **3km 이내**인 곳 우선
+   - **5km 이상**은 특별한 이유 없으면 제외
+   - 거리가 가까울수록 높은 점수
+   
+2. **방향 일관성 (매우 중요!)**: 
+   - ❌ **왔다갔다 하는 동선 금지!** 
+     예) A → C(동쪽 5km) → B(서쪽 4km) ← 다시 돌아옴!
+   - ✅ **한 방향으로 순차적 이동**
+     예) A → B(동쪽 2km) → C(동쪽 3km) ← 계속 같은 방향!
+   - 괄호 안의 방향 정보를 보고 일관된 방향 선택
+   - 되돌아가는(backtracking) 동선은 최대한 회피
+   - 한 방향으로 쭉 가거나, 서서히 원을 그리며 돌아오는 형태가 이상적
+   
+3. 시간대와 목적에 맞는 장소
+4. 여행지로서 가치있는 곳 (동네 시설, 일반 공원 제외)
+5. **체인점 제외** (스타벅스, 맥도날드, 이디야, 투썸플레이스 등)
+6. **동네 시설 무조건 제외** (찜질방, 사우나, 목욕탕, 일반 대중탕, 동네 체육관 등)
+7. 대표 랜드마크는 1일차에 반드시 포함
 
-**일정**:
+**🚫 절대 추천하면 안 되는 장소 (반드시 제외!)**:
+- 찜질방, 사우나, 목욕탕 (예: 지오스파, 스파마린, 삼우목욕탕 등)
+- 동네 시설 (동네 공원, 놀이터, 일반 체육관 등)
+- 체인점 (스타벅스, 맥도날드, 버거킹, 투썸, 이디야 등)
+
+**📍 일정 (거리 정보 포함, 방향성 고려 필수!)**:
 """
+            
+            # 이전 선택 장소 추적 (동선 최적화)
+            prev_location = None
             
             for idx, frame_item in enumerate(schedule_frame):
                 time_slot = frame_item.get('time_slot', '')
                 place_type = frame_item.get('place_type', '')
                 purpose = frame_item.get('purpose', '')
+                day = frame_item.get('day', 1)
                 
                 places_for_slot = all_places_by_timeslot.get(idx, [])
-                place_names = [p.get('name', '') for p in places_for_slot[:10]]  # 상위 10개만
                 
-                prompt += f"\n[{idx}] {time_slot} - {purpose} ({self._get_place_type_korean(place_type)})\n"
-                prompt += f"    후보: {', '.join(place_names)}\n"
+                # 장소명과 위치 정보 포함 (상위 10개)
+                place_infos = []
+                for p in places_for_slot[:10]:
+                    name = p.get('name', '')
+                    lat = p.get('lat')
+                    lng = p.get('lng')
+                    
+                    # 이전 장소와의 거리 및 방향 계산
+                    distance_info = ""
+                    if prev_location and lat and lng:
+                        from math import radians, sin, cos, sqrt, atan2, degrees
+                        R = 6371  # 지구 반경 (km)
+                        lat1, lon1 = radians(prev_location[0]), radians(prev_location[1])
+                        lat2, lon2 = radians(lat), radians(lng)
+                        dlat = lat2 - lat1
+                        dlon = lon2 - lon1
+                        
+                        # 거리 계산
+                        a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+                        c = 2 * atan2(sqrt(a), sqrt(1-a))
+                        distance = R * c
+                        
+                        # 방향 계산 (bearing)
+                        x = sin(dlon) * cos(lat2)
+                        y = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dlon)
+                        bearing = atan2(x, y)
+                        bearing_deg = (degrees(bearing) + 360) % 360
+                        
+                        # 방향을 8방위로 변환
+                        directions = ["북", "북동", "동", "남동", "남", "남서", "서", "북서"]
+                        direction_idx = int((bearing_deg + 22.5) / 45) % 8
+                        direction = directions[direction_idx]
+                        
+                        distance_info = f" ({distance:.1f}km {direction})"
+                    
+                    place_infos.append(f"{name}{distance_info}")
+                
+                prompt += f"\n[{idx}] {day}일차 {time_slot} - {purpose} ({self._get_place_type_korean(place_type)})\n"
+                prompt += f"    후보: {', '.join(place_infos)}\n"
+                
+                # 첫 번째 장소를 prev_location으로 임시 설정 (AI가 참고용)
+                if places_for_slot:
+                    first_place = places_for_slot[0]
+                    prev_location = (first_place.get('lat'), first_place.get('lng'))
             
             prompt += """
 **응답 형식** (JSON만):
@@ -696,8 +761,11 @@ class EnhancedPlaceDiscoveryService:
             
             print(f"✅ AI 선택 완료: {len(selections)}개")
             
-            # {index: place} 매핑 생성
+            # {index: place} 매핑 생성 + 동선 검증
             selected_map = {}
+            prev_selected_location = None
+            total_distance = 0.0
+            
             for sel in selections:
                 idx = sel.get('index')
                 place_name = sel.get('selected_place', '')
@@ -708,8 +776,31 @@ class EnhancedPlaceDiscoveryService:
                 for place in places_for_slot:
                     if place.get('name') == place_name:
                         selected_map[idx] = place
-                        print(f"   [{idx}] {place_name} - {reason}")
+                        
+                        # 동선 검증: 이전 장소와의 거리 계산
+                        distance_str = ""
+                        if prev_selected_location:
+                            lat, lng = place.get('lat'), place.get('lng')
+                            if lat and lng:
+                                from math import radians, sin, cos, sqrt, atan2
+                                R = 6371
+                                lat1, lon1 = radians(prev_selected_location[0]), radians(prev_selected_location[1])
+                                lat2, lon2 = radians(lat), radians(lng)
+                                dlat, dlon = lat2 - lat1, lon2 - lon1
+                                a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+                                c = 2 * atan2(sqrt(a), sqrt(1-a))
+                                distance = R * c
+                                total_distance += distance
+                                distance_str = f" [이전 장소로부터 {distance:.1f}km]"
+                        
+                        print(f"   [{idx}] {place_name}{distance_str} - {reason}")
+                        
+                        # 다음 계산을 위해 현재 장소 저장
+                        prev_selected_location = (place.get('lat'), place.get('lng'))
                         break
+            
+            if total_distance > 0:
+                print(f"\n✅ 전체 이동 거리: {total_distance:.1f}km")
             
             return selected_map
             
@@ -833,13 +924,18 @@ class EnhancedPlaceDiscoveryService:
 3. **스타벅스 같은 체인점 제외**
 4. 현지 특색 있는 카페만"""
         
-        elif place_type == 'spa':
+        elif place_type == 'spa' or place_type == 'hot_spring_spa':
+            # ⚠️ 스파/찜질방은 대부분 여행지답지 않으므로 빈 리스트 반환
+            print(f"   ⚠️ {place_type} 유형은 일반적으로 여행지에 부적합 → 빈 리스트 반환")
+            return []
+            
+            # 만약 정말 특별한 온천 리조트만 원한다면:
             criteria = """
 **선별 기준**:
-1. **관광지로서 가치가 있는** 감성있는 온천/스파만
-2. **동네 목욕탕, 일반 사우나는 무조건 제외**
-3. 특색있는 온천 리조트, 스파 시설
-4. 의심스러우면 제외"""
+1. **관광 명소급 온천 리조트만** (일반 찜질방/사우나/목욕탕 무조건 제외)
+2. ❌ 지오스파, 스파마린, 삼우목욕탕 같은 동네 시설 절대 제외
+3. ✅ 유명 온천 리조트, 관광지급 스파만
+4. 의심스러우면 무조건 제외"""
         
         else:
             criteria = """
