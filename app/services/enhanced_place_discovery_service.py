@@ -925,17 +925,9 @@ class EnhancedPlaceDiscoveryService:
 4. 현지 특색 있는 카페만"""
         
         elif place_type == 'spa' or place_type == 'hot_spring_spa':
-            # ⚠️ 스파/찜질방은 대부분 여행지답지 않으므로 빈 리스트 반환
-            print(f"   ⚠️ {place_type} 유형은 일반적으로 여행지에 부적합 → 빈 리스트 반환")
+            # 🚫 스파/찜질방은 여행지답지 않으므로 빈 리스트 반환
+            print(f"   🚫 {place_type} 유형은 여행지에 부적합 → 빈 리스트 반환")
             return []
-            
-            # 만약 정말 특별한 온천 리조트만 원한다면:
-            criteria = """
-**선별 기준**:
-1. **관광 명소급 온천 리조트만** (일반 찜질방/사우나/목욕탕 무조건 제외)
-2. ❌ 지오스파, 스파마린, 삼우목욕탕 같은 동네 시설 절대 제외
-3. ✅ 유명 온천 리조트, 관광지급 스파만
-4. 의심스러우면 무조건 제외"""
         
         else:
             criteria = """
@@ -1221,6 +1213,12 @@ class EnhancedPlaceDiscoveryService:
             radius_km = frame_item.get('search_radius_km', 3.0)
             purpose = frame_item.get('purpose', '')
             
+            # 🚫 찜질방/사우나 타입은 즉시 스킵 (로그도 간단하게)
+            if place_type in ['spa', 'hot_spring_spa', 'sauna', 'jjimjilbang']:
+                print(f"\n   [{idx}/{len(schedule_frame)}] 🚫 {place_type} 타입 스킵 (여행지 부적합)")
+                all_places_by_timeslot[idx-1] = []
+                continue
+            
             print(f"\n   [{idx}/{len(schedule_frame)}] {day}일차 {time_slot} - {place_type}")
             print(f"      도시: {current_city}")
             print(f"      키워드: {keywords}")
@@ -1350,6 +1348,8 @@ class EnhancedPlaceDiscoveryService:
         """
         🆕 Google Places 검색 + 거리 필터링만 (AI 없음)
         일괄 처리를 위해 사용
+        
+        Note: 찜질방/사우나 타입은 호출 전에 이미 필터링됨
         """
         all_places = []
         
