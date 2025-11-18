@@ -14,9 +14,11 @@
 
 **로그인 불필요, Docker로 즉시 실행** - 🌍 **전세계 모든 도시 지원!**
 
-### ✨ 핵심 특징 (2025-11-19 업데이트: AI 일괄 필터링 + 방향 기반 동선 최적화)
+### ✨ 핵심 특징 (2025-11-19 최신 업데이트: 2단계 하이브리드 시스템)
 
-- 🤖🚗 **AI 일괄 필터링 + 방향 기반 동선 최적화**: 전체 일정을 한 번에 AI가 분석, 거리+방향 정보 기반으로 왔다갔다 하지 않는 최적 조합 선택 (AI 호출 87.5%↓, 이동 거리 최소화!)
+- 🌟🎯 **2단계 하이브리드 시스템**: 
+  - **1단계 (AI)**: 필수 랜드마크 확보 (도시당 1회, Redis 캐싱) - 순천만국가정원 같은 대표 관광지 100% 보장
+  - **2단계 (규칙 기반)**: 거리+평점+인기도 점수 시스템으로 동선 최적화 - 예측 가능, 빠른 속도, 체인점/찜질방 자동 제외
 - 🌍 **전세계 여행 지원**: 도쿄, 파리, 뉴욕, 방콕 등 **전세계 모든 국가/도시** 지원
 - 🚇 **글로벌 대중교통**: 좌표 기반 국가 코드 자동 감지 + 멀티-리전 폴백 (전세계 어디서든 작동)
 - 🤖 **GPT-5 도시 자동 추출**: 국가/주/도시 계층 구조 자동 분석
@@ -858,104 +860,96 @@ function createTransportButtons(distance) {
 - AI 스케줄 프레이머가 "사우나", "목욕탕" 같은 동네 시설을 추천
 - 여행답지 않은 장소들이 결과에 포함됨 (예: 삼우목욕탕, 신대사우나)
 
-**🆕 해결책: Google Places 검색 → AI 일괄 필터링**
+**🆕 해결책: 2단계 하이브리드 시스템 (AI + 규칙 기반)**
 
 ```python
 # enhanced_place_discovery_service.py
 
 async def discover_places_sequential(schedule_frame, base_location, city):
     """
-    🆕 일괄 처리 방식: 모든 장소 검색 → AI 한 번에 필터링
+    🆕 2단계 하이브리드 시스템:
+    1. AI로 필수 랜드마크 확보 (도시당 1회)
+    2. 규칙 기반으로 동선 최적화 배치
     """
-    # Step 1: 모든 시간대에 대해 Google Places 검색 (AI 없이)
-    all_places_by_timeslot = {}
-    for idx, frame_item in enumerate(schedule_frame):
-        places = await self._search_places_nearby_raw(...)  # AI 없이
-        all_places_by_timeslot[idx] = places  # 결과 저장
+    # ========== STEP 1: 필수 랜드마크 확보 (AI 1회) ==========
+    mandatory_landmarks = await self._get_mandatory_landmarks_cached(city)
+    # 예: ["순천만국가정원", "순천만습지", "낙안읍성"]
     
-    # Step 2: AI에게 모든 장소를 한 번에 보내서 최적 조합 선택
-    selected_map = await self.filter_all_places_batch(
-        schedule_frame, all_places_by_timeslot, city
-    )
+    # ========== STEP 2: 순차적 배치 (규칙 기반) ==========
+    schedule = []
+    current_location = base_location
+    landmark_already_used = False
     
-    # Step 3: 선택된 장소로 스케줄 채우기
-    for idx, frame_item in enumerate(schedule_frame):
-        selected_place = selected_map.get(idx)
-        if selected_place:
-            filled_schedule.append(selected_place)
+    for idx, frame_item in enumerate(schedule_frame, 1):
+        # Google Places 검색
+        candidates = await self._search_places_nearby_raw(...)
+        
+        # 장소 선택 (규칙 기반 점수 시스템)
+        if idx == 1 and place_type == 'tourist_attraction':
+            # 첫 시간대: 필수 랜드마크 중 선택
+            selected = self._select_best_landmark(
+                candidates, mandatory_landmarks, current_location
+            )
+        else:
+            # 나머지: 규칙 기반 선택
+            selected = self._select_best_place_smart(
+                candidates, current_location, 
+                mandatory_landmarks, landmark_already_used
+            )
+        
+        schedule.append(selected)
+        current_location = (selected['lat'], selected['lng'])
     
-    return filled_schedule
+    return schedule
 
-async def filter_all_places_batch(schedule_frame, all_places_by_timeslot, city):
+def _select_best_place_smart(places, prev_location, mandatory_landmarks, landmark_used):
     """
-    🆕 모든 시간대의 장소를 한 번에 AI에게 보내서 최적 조합 선택
-    
-    프롬프트 예시:
-    "당신은 순천 여행 큐레이터입니다.
-    아래는 전체 일정과 각 시간대의 후보 장소입니다.
-    **각 시간대마다 가장 적합한 장소 1개씩** 선택해주세요.
-    
-    **선별 기준**:
-    1. 시간대와 목적에 맞는 장소
-    2. 여행지로서 가치있는 곳 (동네 시설 제외)
-    3. 체인점 제외 (스타벅스, 맥도날드 등)
-    4. 전체 동선 최적화 고려
-    
-    **🎯 선별 기준 (우선순위)**:
-    1. **동선 최적화 (최우선!)**: 이전 시간대에서 선택한 장소와 가까운 곳 우선
-    2. 시간대와 목적에 맞는 장소
-    3. 여행지로서 가치있는 곳 (동네 시설 제외)
-    4. 체인점 제외
-    5. 대표 랜드마크는 반드시 포함
-    
-    **📍 일정 (위치 정보 포함)**:
-    [0] 1일차 09:00-11:00 - 오전 관광 (관광지)
-        후보: 순천만국가정원, 순천만습지 (5.2km), 낙안읍성 (18.3km), 삼우목욕탕 (2.1km)
-    [1] 1일차 12:00-13:30 - 점심 (맛집)
-        후보: 순천만오리정 (0.8km), 맛의거리 (4.5km), 맥도날드 (1.2km)
-    [2] 1일차 15:00-17:00 - 카페 (카페)
-        후보: 로컬카페A (2.1km), 스타벅스 (0.5km), 감성카페B (3.8km)
-    
-    **응답**: {"selections": [
-        {"index": 0, "selected_place": "순천만국가정원", "reason": "대표 랜드마크"},
-        {"index": 1, "selected_place": "순천만오리정", "reason": "0.8km로 가까움 + 현지 맛집"},
-        {"index": 2, "selected_place": "로컬카페A", "reason": "동선상 적절 + 스타벅스 제외"}
-    ]}
-    
-    ✅ 전체 이동 거리: 2.9km (최적화됨!)"
+    🎯 규칙 기반 스마트 선택
+    - 필수 랜드마크 우선 (아직 사용 안 했으면)
+    - 거리 + 평점 + 인기도 종합 점수
+    - 체인점/찜질방 자동 제외
     """
-    response = await client.chat.completions.create(
-        model="gpt-5",
-        max_completion_tokens=2000,  # 전체 일정이므로 넉넉하게
-        messages=[...]
-    )
+    for place in places:
+        score = 0
+        distance = calculate_distance(prev_location, place)
+        
+        # 🌟 필수 랜드마크 보너스
+        if not landmark_used and place['name'] in mandatory_landmarks:
+            score += 1000  # 압도적 우선순위!
+        
+        # 거리 점수
+        if distance <= 1.5:
+            score += 100
+        elif distance <= 2.5:
+            score += 70
+        elif distance <= 3.5:
+            score += 40
+        
+        # 평점 점수
+        score += place['rating'] * 10
+        
+        # 인기도 점수
+        score += min(place['review_count'] / 10, 20)
+        
+        # 🚫 체인점/찜질방 감점
+        if is_chain_store(place['name']):
+            score -= 10000  # 사실상 제외
+        
+        scored_places.append((score, place))
     
-    # JSON 파싱 및 매핑
-    result = json.loads(content)
-    selections = result.get('selections', [])
-    
-    # {index: place} 매핑 생성
-    selected_map = {}
-    for sel in selections:
-        idx = sel.get('index')
-        place_name = sel.get('selected_place')
-        # 해당 시간대의 장소 목록에서 이름 매칭
-        for place in all_places_by_timeslot[idx]:
-            if place.get('name') == place_name:
-                selected_map[idx] = place
-                break
-    
-    return selected_map
+    # 최고 점수 반환
+    return sorted(scored_places, reverse=True)[0][1]
 ```
 
-**🆕 일괄 필터링의 장점**:
-- ✅ **AI 호출 87.5% 감소**: 8회 → 1회 (하루 8개 시간대 기준)
-- ✅ **비용 절감**: OpenAI API 비용 대폭 감소
-- ✅ **전체 맥락 고려**: AI가 전체 일정을 보고 최적 조합 선택
-- ✅ **동선 최적화**: 이동 거리와 시간대를 함께 고려
-- ✅ **동네 사우나 제외**, 여행지답게 감성있는 온천만 추천
-- ✅ **체인점 제외**, 현지 고유 맛집/카페만 추천
-- ✅ **전세계 모든 도시 대응** (정적 DB 불필요)
+**🆕 2단계 하이브리드 시스템의 장점**:
+- 🌟 **랜드마크 100% 보장**: 순천만국가정원 같은 대표 관광지 반드시 포함
+- ✅ **동선 완벽 최적화**: 거리 기반 규칙으로 왔다갔다 방지
+- ⚡ **속도 향상**: AI 호출 최소화 (도시당 1회만)
+- 💰 **비용 절감**: OpenAI API 비용 대폭 감소
+- 🎯 **예측 가능**: 같은 입력 → 비슷한 결과
+- 🚫 **체인점 자동 제외**: 스타벅스, 맥도날드 등
+- 🚫 **찜질방 자동 제외**: 동네 시설 완전 차단
+- 🌍 **전세계 대응**: 정적 DB 불필요
 
 **🔧 AI 응답 안정성 강화**:
 ```python
@@ -975,37 +969,43 @@ async def filter_all_places_batch(schedule_frame, all_places_by_timeslot, city):
 - ✅ **AI 응답 중단(truncation) 방지**
 - ✅ **빈 응답 시 안전한 폴백**
 
-**🆕 개선된 실행 흐름 (AI 일괄 필터링)**:
+**🆕 개선된 실행 흐름 (2단계 하이브리드)**:
 ```
 1️⃣ 순천 1박 2일 요청
      ↓
 2️⃣ AI 스케줄 프레이머: 시간대별 장소 유형 결정
    09:00 관광지, 12:00 맛집, 15:00 카페, 18:00 저녁, 20:00 야경
      ↓
-3️⃣ 모든 시간대에 대해 Google Places 검색 (한 번에)
-   🏛️ 09:00 관광지: [순천만국가정원, 순천만습지, 낙안읍성, 죽도봉공원, 삼우목욕탕, ...] (30개)
-   🍽️ 12:00 맛집: [맛의거리, 순천만오리정, 시골집식당, 맥도날드, ...] (25개)
-   ☕ 15:00 카페: [카페 순천, 스타벅스, 로컬카페A, ...] (20개)
-   🌃 20:00 야경: [죽도봉공원, 순천만습지 석양, ...] (15개)
+3️⃣ 🌟 AI 필수 랜드마크 확보 (도시당 1회만!)
+   "순천의 절대 빠지면 안 되는 대표 관광지 TOP 3는?"
+   → ["순천만국가정원", "순천만습지", "낙안읍성"]
+   💾 Redis 캐싱 (30일) - 다음 요청부터는 즉시 로드
      ↓
-4️⃣ 🤖 AI 일괄 필터링 (핵심! 동선 최적화)
-   "다음은 순천 1박 2일 전체 일정과 각 시간대 후보 장소입니다.
-   전체 동선과 맥락을 고려하여 각 시간대마다 최적의 장소 1개씩 선택해주세요.
+4️⃣ 🎯 규칙 기반 순차 배치
    
-   **🎯 선별 기준 (우선순위)**:
-   1. **동선 최적화 (최우선!)**: 이전 시간대에서 선택한 장소와 가까운 곳 우선
-   2. 시간대와 목적에 맞는 장소
-   3. 여행지로서 가치있는 곳 (동네 시설 제외)
-   4. 체인점 제외
-   5. 대표 랜드마크는 반드시 포함"
+   [시간대 1] 09:00 관광지
+   → Google Places 검색 (5km 반경)
+   → 후보: 순천만국가정원, 순천만습지, 낙안읍성, 죽도봉공원, ...
+   → 🌟 필수 랜드마크 우선 선택: "순천만국가정원" (+1000점)
+   ✅ 선택: 순천만국가정원 (점수: 1050, 거리: 3.2km)
    
-   예시 프롬프트 (거리 + 방향 정보 포함):
-   [0] 1일차 09:00-11:00 - 오전 관광 (관광지)
-       후보: 순천만국가정원, 순천만습지 (5.2km 동), 낙안읍성 (18.3km 남동)
-   [1] 1일차 12:00-13:30 - 점심 (맛집)
-       후보: 순천만오리정 (0.8km 동), 맛의거리 (4.5km 서), 맥도날드 (1.2km 남)
-   [2] 1일차 15:00-17:00 - 카페 (카페)
-       후보: 로컬카페A (2.1km 동), 스타벅스 (0.5km 서), 감성카페B (3.8km 북)
+   [시간대 2] 12:00 맛집
+   → Google Places 검색 (순천만국가정원 기준 2km 반경)
+   → 후보: 순천만오리정, 맛의거리, 맥도날드, ...
+   → 점수 계산:
+     • 순천만오리정: 거리 0.8km (+100점) + 평점 4.5 (+45점) + 리뷰 200 (+20점) = 165점
+     • 맥도날드: 거리 1.2km (+100점) + 평점 3.5 (+35점) - 체인점 (-10000점) = -9865점 ❌
+   ✅ 선택: 순천만오리정 (점수: 165, 거리: 0.8km) 🟢
+   
+   [시간대 3] 15:00 카페
+   → Google Places 검색 (순천만오리정 기준 1.5km 반경)
+   → 후보: 로컬카페A, 스타벅스, 감성카페B, ...
+   → 점수 계산:
+     • 로컬카페A: 거리 0.9km (+100점) + 평점 4.3 (+43점) = 143점
+     • 스타벅스: 거리 0.5km (+100점) + 평점 4.2 (+42점) - 체인점 (-10000점) = -9858점 ❌
+   ✅ 선택: 로컬카페A (점수: 143, 거리: 0.9km) ✅
+   
+   📍 총 이동 거리: 1.7km (최적화됨!)
    
    AI가 동선과 방향을 보고 판단:
    - 09:00 → "순천만국가정원" (대표 랜드마크)
