@@ -238,7 +238,12 @@ class AIScheduleFramer:
             
             schedule_frame = data.get('schedule_frame', [])
             
-            print(f"   ✅ AI 스케줄 프레임 생성 완료: {len(schedule_frame)}개 시간대")
+            print(f"   🔍 필터링 전: {len(schedule_frame)}개 시간대, days_count={days_count}, end_time={end_time}")
+            
+            # end_time 필터링 적용
+            schedule_frame = self._filter_by_end_time(schedule_frame, days_count, end_time)
+            
+            print(f"   ✅ AI 스케줄 프레임 생성 완료: {len(schedule_frame)}개 시간대 (end_time 필터링 적용)")
             
             # Redis 캐싱 (7일)
             try:
@@ -264,6 +269,101 @@ class AIScheduleFramer:
             print(traceback.format_exc())
             return self._create_fallback_frame(days_count, start_time, end_time)
     
+    def _filter_by_end_time(
+        self,
+        schedule_frame: List[Dict[str, Any]],
+        days_count: int,
+        end_time: str
+    ) -> List[Dict[str, Any]]:
+        """
+        end_time을 기준으로 스케줄 필터링
+        마지막 날의 경우 end_time 이후에 시작하는 시간대 제거
+        """
+        print(f"   🔍 _filter_by_end_time 호출: schedule_frame={len(schedule_frame) if schedule_frame else 0}, days_count={days_count}, end_time={end_time}")
+        
+        if not schedule_frame or not end_time:
+            print(f"   ⚠️ 필터링 스킵: schedule_frame={len(schedule_frame) if schedule_frame else 0}, end_time={end_time}")
+            return schedule_frame
+        
+        if not days_count:
+            print(f"   ⚠️ 필터링 스킵: days_count={days_count}")
+            return schedule_frame
+        
+        try:
+            # end_time을 분으로 변환 (예: "18:00" -> 1080분)
+            end_hour, end_minute = map(int, end_time.split(':'))
+            end_minutes = end_hour * 60 + end_minute
+            
+            print(f"   🔍 필터링 시작: end_time={end_time} ({end_minutes}분), days_count={days_count}")
+            
+            filtered = []
+            filtered_count = 0
+            
+            for item in schedule_frame:
+                day = item.get('day', 1)
+                time_slot = item.get('time_slot', '')
+                
+                # 디버깅: 마지막 날 항목 확인
+                if day == days_count:
+                    print(f"   🔍 마지막 날 항목: day={day}, time_slot={time_slot}")
+                
+                # 마지막 날이 아니면 모두 포함
+                if day != days_count:
+                    filtered.append(item)
+                    continue
+                
+                # 마지막 날인 경우 end_time 체크
+                # time_slot 파싱 (예: "20:00-22:00" 또는 "20:00")
+                if '-' in time_slot:
+                    start_str = time_slot.split('-')[0].strip()
+                    end_str = time_slot.split('-')[1].strip()
+                else:
+                    start_str = time_slot.strip()
+                    end_str = None
+                
+                try:
+                    start_hour, start_minute = map(int, start_str.split(':'))
+                    start_minutes = start_hour * 60 + start_minute
+                    
+                    # 종료 시간도 파싱 (있는 경우)
+                    end_slot_minutes = None
+                    if end_str:
+                        try:
+                            end_slot_hour, end_slot_minute = map(int, end_str.split(':'))
+                            end_slot_minutes = end_slot_hour * 60 + end_slot_minute
+                        except:
+                            pass
+                    
+                    # 마지막 날인 경우: 시작 시간이 end_time 이후이면 제외
+                    # 또는 종료 시간이 end_time을 초과하면 제외 (더 엄격한 필터링)
+                    if start_minutes > end_minutes:
+                        # 시작 시간이 end_time 이후
+                        print(f"   🚫 필터링: {day}일차 {time_slot} (시작 {start_str} > end_time {end_time})")
+                        filtered_count += 1
+                        continue
+                    elif end_slot_minutes and end_slot_minutes > end_minutes:
+                        # 종료 시간이 end_time을 초과 (예: 17:30-18:30, end_time=18:00)
+                        # 이 경우는 포함하되, 종료 시간을 end_time으로 조정할 수도 있음
+                        # 하지만 일단은 포함하는 것이 자연스러움
+                        pass
+                    
+                    filtered.append(item)
+                except (ValueError, IndexError) as e:
+                    # 시간 파싱 실패 시 포함 (안전하게 처리)
+                    print(f"   ⚠️ 시간 파싱 실패: {time_slot}, 포함: {e}")
+                    filtered.append(item)
+            
+            if filtered_count > 0:
+                print(f"   ✅ end_time 필터링 완료: {filtered_count}개 시간대 제외, {len(filtered)}개 유지")
+            
+            return filtered
+            
+        except Exception as e:
+            print(f"   ⚠️ end_time 필터링 실패: {e}, 원본 반환")
+            import traceback
+            print(traceback.format_exc())
+            return schedule_frame
+    
     def _create_fallback_frame(
         self,
         days_count: int,
@@ -272,75 +372,64 @@ class AIScheduleFramer:
     ) -> List[Dict[str, Any]]:
         """
         AI 실패 시 규칙 기반 폴백 프레임 생성
+        end_time을 고려하여 시간대 필터링
         """
-        print(f"   ⚠️ 폴백 모드: 규칙 기반 스케줄 프레임 생성")
+        print(f"   ⚠️ 폴백 모드: 규칙 기반 스케줄 프레임 생성 (end_time: {end_time})")
         
         frame = []
         
+        # end_time을 분으로 변환
+        try:
+            end_hour, end_minute = map(int, end_time.split(':'))
+            end_minutes = end_hour * 60 + end_minute
+        except:
+            end_minutes = 18 * 60  # 기본값 18:00
+        
         for day in range(1, days_count + 1):
-            # 패턴: 관광 → 점심 → 카페 → 관광 → 저녁 → 야간(선택적)
-            frame.extend([
-                {
+            # 기본 시간대 패턴
+            time_slots = [
+                {"slot": "09:00-11:00", "type": "tourist_attraction", "purpose": "오전 관광", "radius": 5.0 if day == 1 else 3.0, "duration": 120, "priority": "high"},
+                {"slot": "11:30-13:00", "type": "restaurant", "purpose": "점심 식사", "radius": 2.0, "duration": 90, "priority": "high"},
+                {"slot": "13:30-15:00", "type": "cafe", "purpose": "카페 휴식", "radius": 1.5, "duration": 60, "priority": "medium"},
+                {"slot": "15:30-17:30", "type": "tourist_attraction", "purpose": "오후 관광", "radius": 3.0, "duration": 120, "priority": "high"},
+                {"slot": "18:00-19:30", "type": "restaurant", "purpose": "저녁 식사", "radius": 2.0, "duration": 90, "priority": "high"},
+                {"slot": "20:00-22:00", "type": "bar", "purpose": "야경/술집", "radius": 3.0, "duration": 120, "priority": "medium"}
+            ]
+            
+            for ts in time_slots:
+                # 마지막 날인 경우 end_time 이후 시간대 제외
+                if day == days_count:
+                    slot_start_str = ts["slot"].split('-')[0]
+                    try:
+                        slot_start_hour, slot_start_minute = map(int, slot_start_str.split(':'))
+                        slot_start_minutes = slot_start_hour * 60 + slot_start_minute
+                        
+                        if slot_start_minutes >= end_minutes:
+                            # end_time 이후 시간대는 제외
+                            continue
+                    except:
+                        pass
+                
+                frame.append({
                     "day": day,
-                    "time_slot": "09:00-11:00",
-                    "place_type": "tourist_attraction",
-                    "purpose": "오전 관광",
-                    "search_keywords": ["관광지", "명소"],
-                    "search_radius_km": 5.0 if day == 1 else 3.0,  # 1일차만 5km, 이후 3km
-                    "priority": "high",
-                    "expected_duration_minutes": 120
-                },
-                {
-                    "day": day,
-                    "time_slot": "11:30-13:00",
-                    "place_type": "restaurant",
-                    "purpose": "점심 식사",
-                    "search_keywords": ["맛집", "식당"],
-                    "search_radius_km": 2.0,  # 🎯 타이트하게: 3.0 → 2.0km
-                    "priority": "high",
-                    "expected_duration_minutes": 90
-                },
-                {
-                    "day": day,
-                    "time_slot": "13:30-15:00",
-                    "place_type": "cafe",
-                    "purpose": "카페 휴식",
-                    "search_keywords": ["카페", "디저트"],
-                    "search_radius_km": 1.5,  # 🎯 타이트하게: 2.0 → 1.5km
-                    "priority": "medium",
-                    "expected_duration_minutes": 60
-                },
-                {
-                    "day": day,
-                    "time_slot": "15:30-17:30",
-                    "place_type": "tourist_attraction",
-                    "purpose": "오후 관광",
-                    "search_keywords": ["관광지", "공원"],
-                    "search_radius_km": 3.0,  # 🎯 타이트하게: 4.0 → 3.0km
-                    "priority": "high",
-                    "expected_duration_minutes": 120
-                },
-                {
-                    "day": day,
-                    "time_slot": "18:00-19:30",
-                    "place_type": "restaurant",
-                    "purpose": "저녁 식사",
-                    "search_keywords": ["맛집", "저녁식사"],
-                    "search_radius_km": 2.0,  # 🎯 타이트하게: 3.0 → 2.0km
-                    "priority": "high",
-                    "expected_duration_minutes": 90
-                },
-                {
-                    "day": day,
-                    "time_slot": "20:00-22:00",
-                    "place_type": "bar",
-                    "purpose": "야경/술집",
-                    "search_keywords": ["바", "펍", "야경명소"],
-                    "search_radius_km": 3.0,  # 🎯 타이트하게: 4.0 → 3.0km
-                    "priority": "medium",
-                    "expected_duration_minutes": 120
-                }
-            ])
+                    "time_slot": ts["slot"],
+                    "place_type": ts["type"],
+                    "purpose": ts["purpose"],
+                    "search_keywords": self._get_keywords_for_type(ts["type"]),
+                    "search_radius_km": ts["radius"],
+                    "priority": ts["priority"],
+                    "expected_duration_minutes": ts["duration"]
+                })
         
         return frame
+    
+    def _get_keywords_for_type(self, place_type: str) -> List[str]:
+        """장소 유형에 따른 검색 키워드 반환"""
+        keywords_map = {
+            "tourist_attraction": ["관광지", "명소"],
+            "restaurant": ["맛집", "식당"],
+            "cafe": ["카페", "디저트"],
+            "bar": ["바", "펍", "야경명소"]
+        }
+        return keywords_map.get(place_type, ["장소"])
 

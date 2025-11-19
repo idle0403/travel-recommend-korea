@@ -24,3 +24,6 @@ python-jose[cryptography]==3.3.0
 # 8단계 아키텍처 추가 의존성
 schedule==1.2.0  # 캐시 정리 스케줄링
 cachetools==5.3.2  # 메모리 캐시
+
+# AWS Lambda 지원
+mangum>=0.17.0  # FastAPI를 Lambda 핸들러로 변환

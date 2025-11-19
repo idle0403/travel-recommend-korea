@@ -109,7 +109,7 @@ async def _generate_8step_itinerary(request: TravelPlanRequest) -> Dict[str, Any
     print(f"8단계 처리된 일정 생성: {len(ai_itinerary.get('schedule', []))}개 항목")
     return ai_itinerary
 
-async def _process_8step_itinerary(ai_itinerary: Dict[str, Any]) -> tuple:
+async def _process_8step_itinerary(ai_itinerary: Dict[str, Any], days_count: int = None, end_time: str = None) -> tuple:
     """8단계 처리된 일정 데이터 가공"""
     sample_itinerary = []
     locations_for_route = []
@@ -117,7 +117,59 @@ async def _process_8step_itinerary(ai_itinerary: Dict[str, Any]) -> tuple:
     # 8단계 처리 메타데이터 추출
     processing_metadata = ai_itinerary.get('processing_metadata', {})
     
-    for item in ai_itinerary.get('schedule', []):
+    # end_time 필터링을 위한 준비
+    end_minutes = None
+    filtered_count = 0
+    if end_time and days_count:
+        try:
+            end_hour, end_minute = map(int, end_time.split(':'))
+            end_minutes = end_hour * 60 + end_minute
+            print(f"   🔍 엔드포인트 필터링 준비: end_time={end_time} ({end_minutes}분), days_count={days_count}")
+        except Exception as e:
+            print(f"   ⚠️ end_time 파싱 실패: {e}")
+    
+    schedule_items = ai_itinerary.get('schedule', [])
+    print(f"   📋 처리할 스케줄 항목: {len(schedule_items)}개")
+    
+    for item in schedule_items:
+        # end_time 필터링 적용 (마지막 날의 경우)
+        if end_minutes and days_count:
+            day = item.get('day', 1)
+            time_str = item.get('time', '')
+            time_slot = item.get('time_slot', '')
+            
+            # 디버깅: 각 항목 정보 출력
+            if day == days_count:
+                print(f"   🔍 마지막 날 항목 확인: day={day}, time={time_str}, time_slot={time_slot}")
+            
+            if day == days_count:
+                # 시간 정보 추출
+                start_str = None
+                if time_slot and '-' in time_slot:
+                    start_str = time_slot.split('-')[0].strip()
+                elif time_str:
+                    start_str = time_str.strip()
+                
+                if start_str:
+                    try:
+                        start_hour, start_minute = map(int, start_str.split(':'))
+                        start_minutes = start_hour * 60 + start_minute
+                        
+                        print(f"   🔍 시간 비교: 시작={start_str} ({start_minutes}분) vs end_time={end_time} ({end_minutes}분)")
+                        
+                        # 시작 시간이 end_time 이후이면 제외
+                        if start_minutes > end_minutes:
+                            print(f"   🚫 엔드포인트 필터링: {day}일차 {time_slot or time_str} (시작 {start_str} > end_time {end_time})")
+                            filtered_count += 1
+                            continue
+                        else:
+                            print(f"   ✅ 포함: {day}일차 {time_slot or time_str} (시작 {start_str} <= end_time {end_time})")
+                    except (ValueError, IndexError) as e:
+                        # 시간 파싱 실패 시 포함 (안전하게 처리)
+                        print(f"   ⚠️ 시간 파싱 실패: {start_str}, 에러: {e}, 포함")
+                        pass
+                else:
+                    print(f"   ⚠️ 시작 시간 추출 실패: time={time_str}, time_slot={time_slot}, 포함")
         itinerary_item = ItineraryItem(
             time=item.get('time', '09:00'),
             name=item.get('place_name', ''),
@@ -135,6 +187,8 @@ async def _process_8step_itinerary(ai_itinerary: Dict[str, Any]) -> tuple:
         # 8단계 처리 데이터 반영
         if hasattr(itinerary_item, '__dict__'):
             itinerary_item.__dict__.update({
+                'day': item.get('day', 1),  # day 필드 추가
+                'time_slot': item.get('time_slot', ''),  # time_slot 필드 추가
                 'verified': item.get('verified', False),
                 'verification_status': item.get('verification_status', 'unknown'),
                 'blog_reviews': item.get('blog_reviews', []),
@@ -150,6 +204,9 @@ async def _process_8step_itinerary(ai_itinerary: Dict[str, Any]) -> tuple:
             'lat': item.get('lat', DEFAULT_COORDINATES['lat']),
             'lng': item.get('lng', DEFAULT_COORDINATES['lng'])
         })
+    
+    if filtered_count > 0:
+        print(f"   ✅ 엔드포인트 필터링 완료: {filtered_count}개 항목 제외, {len(sample_itinerary)}개 유지")
     
     # 경로 최적화 및 실시간 대중교통 정보
     maps_service = GoogleMapsService()
@@ -299,7 +356,19 @@ async def create_travel_plan(
         
         # 8단계 아키텍처로 실제 여행 일정 생성
         ai_itinerary = await _generate_8step_itinerary(request)
-        sample_itinerary, optimized_route = await _process_8step_itinerary(ai_itinerary)
+        
+        # days_count 계산 (start_date와 end_date로부터)
+        days_count = 1
+        if start_date and end_date:
+            try:
+                from datetime import datetime
+                start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+                end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+                days_count = (end_dt - start_dt).days + 1
+            except:
+                pass
+        
+        sample_itinerary, optimized_route = await _process_8step_itinerary(ai_itinerary, days_count=days_count, end_time=end_time)
         
         print(f"✅ 8단계 처리 완료: {len(sample_itinerary)}개 장소 생성")
         

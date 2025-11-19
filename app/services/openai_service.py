@@ -1655,7 +1655,9 @@ class OpenAIService:
         filled_schedule = await enhanced_discovery.discover_places_sequential(
             schedule_frame=schedule_frame,
             base_location=base_location,
-            city=city
+            city=city,
+            days_count=days_count,
+            end_time=end_time
         )
         
         if not filled_schedule:

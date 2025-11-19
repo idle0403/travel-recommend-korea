@@ -1,0 +1,111 @@
+# =============================================================================
+# Travel Recommend Korea - Terraform 변수 설정 예시
+# =============================================================================
+# 
+# 사용 방법:
+# 1. 이 파일을 terraform.tfvars로 복사: cp terraform.tfvars.example terraform.tfvars
+# 2. 실제 값으로 환경 변수들을 채워넣으세요
+# 3. terraform.tfvars는 .gitignore에 포함되어 있어 Git에 커밋되지 않습니다
+#
+# 보안 주의사항:
+# - API 키와 시크릿은 절대 Git에 커밋하지 마세요
+# - 프로덕션 환경에서는 AWS Secrets Manager 사용을 권장합니다
+# =============================================================================
+
+# AWS 설정
+aws_region  = "ap-northeast-2"
+environment = "dev"
+
+# 프로젝트 설정
+project_name = "travel-recommend-korea"
+
+# Lambda 설정
+lambda_memory_size                    = 1024  # MB (최소 128, 최대 10240)
+lambda_timeout                        = 300   # 초 (최대 900초)
+lambda_reserved_concurrent_executions  = null  # null이면 제한 없음
+
+# Function URL 설정
+enable_function_url     = true
+function_url_auth_type  = "NONE"  # AWS_IAM 또는 NONE
+function_url_cors_origins = ["*"]  # 프로덕션에서는 특정 도메인만 허용
+function_url_cors_methods = ["*"]
+function_url_cors_headers = ["*"]
+
+# 로깅 및 추적
+enable_xray_tracing = false
+log_retention_days  = 7  # CloudWatch Logs 보관 기간 (일)
+
+# =============================================================================
+# 환경 변수 설정
+# =============================================================================
+# 
+# 중요: 실제 값은 terraform.tfvars에 설정하거나 AWS Secrets Manager 사용
+# 
+# Lambda 환경 변수로 전달됩니다.
+# 민감한 정보(API 키 등)는 AWS Secrets Manager 사용을 권장합니다.
+# =============================================================================
+
+environment_variables = {
+  # ============================================================================
+  # 필수 API 키
+  # ============================================================================
+  OPENAI_API_KEY      = "sk-proj-your-openai-api-key-here"
+  GOOGLE_MAPS_API_KEY = "your-google-maps-api-key-here"
+  
+  # ============================================================================
+  # 선택적 API 키 (기능 활성화를 위해 필요)
+  # ============================================================================
+  NAVER_CLIENT_ID     = "your-naver-client-id"
+  NAVER_CLIENT_SECRET = "your-naver-client-secret"
+  OPENWEATHER_API_KEY = "your-openweather-api-key"
+  NOTION_TOKEN        = "your-notion-integration-token"
+  NOTION_DATABASE_ID  = "your-notion-database-id"
+  
+  # ============================================================================
+  # Redis 설정
+  # ============================================================================
+  # Lambda에서는 외부 Redis 서버가 필요합니다.
+  # 옵션 1: ElastiCache Redis (VPC 내부)
+  #   REDIS_URL = "redis://your-elasticache-endpoint:6379/0"
+  # 옵션 2: 외부 Redis 서버 (예: Upstash, Redis Cloud)
+  #   REDIS_URL = "redis://your-redis-host:6379/0"
+  # 옵션 3: Redis 없이 사용 (캐싱 비활성화, 성능 저하 가능)
+  #   REDIS_URL = ""  # 또는 이 변수를 제거
+  REDIS_URL = ""
+  REDIS_HOST = ""
+  REDIS_PORT = "6379"
+  CACHE_TTL  = "3600"  # 캐시 TTL (초)
+  
+  # ============================================================================
+  # 애플리케이션 설정
+  # ============================================================================
+  DEBUG              = "False"  # 프로덕션에서는 False
+  ENVIRONMENT        = "production"  # development, staging, production
+  LOG_LEVEL          = "INFO"  # DEBUG, INFO, WARNING, ERROR
+  USE_MOCK_DATA      = "False"  # API 키 없을 때만 True
+  IGNORE_CACHE       = "False"
+  VERBOSE_LOGGING    = "False"
+  
+  # ============================================================================
+  # OpenAI 설정
+  # ============================================================================
+  OPENAI_MODEL       = "gpt-4-1106-preview"  # 또는 "gpt-4o", "gpt-4o-mini" 등
+  OPENAI_MAX_TOKENS  = "2000"
+  
+  # ============================================================================
+  # 기본 설정
+  # ============================================================================
+  DEFAULT_CITY            = "Seoul"
+  DEFAULT_LANGUAGE       = "ko"
+  DEFAULT_CURRENCY       = "KRW"
+  DEFAULT_DURATION_HOURS = "6"
+  DEFAULT_BUDGET_PER_PERSON = "50000"
+  
+  # ============================================================================
+  # Lambda 전용 설정
+  # ============================================================================
+  # Lambda 환경에서는 일부 기능이 제한될 수 있습니다
+  # 예: 파일 시스템 쓰기, 장기 실행 작업 등
+  LAMBDA_ENV = "true"
+}
+

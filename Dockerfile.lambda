@@ -1,0 +1,110 @@
+# 🐳 AWS Lambda용 Docker 이미지 (Redis 포함)
+# Python 3.13 + FastAPI + Redis + Lambda Runtime Interface Client
+
+FROM public.ecr.aws/lambda/python:3.13
+
+# 작업 디렉토리 설정
+WORKDIR ${LAMBDA_TASK_ROOT}
+
+# 시스템 패키지 업데이트 및 필수 도구 설치
+# Lambda Python 베이스 이미지는 Amazon Linux 2023 기반 (microdnf 사용)
+RUN if command -v microdnf > /dev/null; then \
+        microdnf install -y \
+        gcc \
+        gcc-c++ \
+        libxml2-devel \
+        libxslt-devel \
+        tar \
+        wget \
+        make \
+        && microdnf clean all; \
+    elif command -v yum > /dev/null; then \
+        yum update -y && \
+        yum install -y \
+        gcc \
+        gcc-c++ \
+        libxml2-devel \
+        libxslt-devel \
+        tar \
+        wget \
+        make \
+        && yum clean all; \
+    elif command -v apt-get > /dev/null; then \
+        apt-get update && \
+        apt-get install -y \
+        gcc \
+        g++ \
+        libxml2-dev \
+        libxslt1-dev \
+        tar \
+        wget \
+        make \
+        && apt-get clean && \
+        rm -rf /var/lib/apt/lists/*; \
+    else \
+        echo "⚠️ 패키지 매니저를 찾을 수 없습니다." && exit 1; \
+    fi && \
+    echo "✅ 필수 도구 확인:" && \
+    command -v tar && command -v wget && command -v make && command -v gcc
+
+# Redis 설치 (소스에서 빌드)
+# Lambda 베이스 이미지에 Redis가 없을 수 있으므로 소스에서 빌드
+# LTO 비활성화로 빌드 안정성 향상
+RUN set -e && \
+    echo "📥 Redis 설치 시작..." && \
+    mkdir -p /tmp/redis-build && \
+    cd /tmp/redis-build && \
+    echo "📥 Redis 소스 다운로드 중..." && \
+    wget https://download.redis.io/redis-stable.tar.gz && \
+    echo "📦 Redis 압축 해제 중..." && \
+    tar xzf redis-stable.tar.gz && \
+    cd redis-stable && \
+    echo "🔨 Redis 빌드 중 (LTO 비활성화)..." && \
+    make MALLOC=libc BUILD_TLS=no CFLAGS="-O2 -fno-lto" LDFLAGS="-fno-lto" -j1 && \
+    echo "📋 빌드된 Redis 바이너리 확인..." && \
+    ls -lah src/redis-server src/redis-cli && \
+    file src/redis-server && \
+    echo "📋 Redis 설치 (make install)..." && \
+    make PREFIX=/usr/local install && \
+    echo "📋 추가 경로에 복사..." && \
+    cp -f /usr/local/bin/redis-server /usr/bin/redis-server || true && \
+    cp -f /usr/local/bin/redis-cli /usr/bin/redis-cli || true && \
+    chmod +x /usr/local/bin/redis-server /usr/local/bin/redis-cli && \
+    chmod +x /usr/bin/redis-server /usr/bin/redis-cli 2>/dev/null || true && \
+    echo "✅ Redis 설치 완료" && \
+    echo "📍 설치된 Redis 바이너리 확인:" && \
+    ls -lah /usr/local/bin/redis-* && \
+    /usr/local/bin/redis-server --version && \
+    echo "📍 심볼릭 링크 생성..." && \
+    ln -sf /usr/local/bin/redis-server /var/task/redis-server || true && \
+    ln -sf /usr/local/bin/redis-cli /var/task/redis-cli || true && \
+    cd / && \
+    rm -rf /tmp/redis-build && \
+    echo "✅ Redis 설치 및 정리 완료"
+
+# Python 의존성 파일 복사
+COPY requirements.txt .
+
+# Python 패키지 설치 (Lambda용 추가 패키지 포함)
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# 애플리케이션 코드 복사
+COPY app/ ${LAMBDA_TASK_ROOT}/app/
+# 프론트엔드 파일 복사 (정적 파일 서빙을 위해 필요)
+COPY frontend/ ${LAMBDA_TASK_ROOT}/frontend/
+
+# Redis 시작 스크립트 복사
+COPY scripts/start_redis.sh /usr/local/bin/start_redis.sh
+RUN chmod +x /usr/local/bin/start_redis.sh
+
+# Lambda 핸들러 설정
+# Mangum을 사용하여 FastAPI 앱을 Lambda 핸들러로 래핑
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV REDIS_URL=redis://localhost:6379/0
+ENV REDIS_HOST=localhost
+ENV REDIS_PORT=6379
+
+# Lambda 핸들러 함수
+CMD ["app.lambda_handler.handler"]

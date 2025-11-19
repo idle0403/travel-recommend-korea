@@ -1,0 +1,23 @@
+# Terraform 파일
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# 환경 변수 파일
+terraform.tfvars
+*.tfvars
+!terraform.tfvars.example
+
+# 백업 파일
+*.backup
+*.bak
+

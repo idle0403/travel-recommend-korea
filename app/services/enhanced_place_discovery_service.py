@@ -1068,7 +1068,9 @@ JSON 형식으로만 답변:
         self,
         schedule_frame: List[Dict[str, Any]],
         base_location: tuple[float, float],
-        city: str
+        city: str,
+        days_count: int = None,
+        end_time: str = None
     ) -> List[Dict[str, Any]]:
         """
         🆕 2단계 하이브리드 시스템:
@@ -1110,6 +1112,40 @@ JSON 형식으로만 답변:
             keywords = frame_item.get('search_keywords', [])
             radius_km = frame_item.get('search_radius_km', 3.0)
             purpose = frame_item.get('purpose', '')
+            
+            # 🚫 end_time 필터링: 마지막 날의 경우 end_time 이후 시간대 스킵
+            if end_time and days_count and day == days_count:
+                # time_slot에서 시작 시간 추출
+                start_str = None
+                if time_slot and '-' in time_slot:
+                    start_str = time_slot.split('-')[0].strip()
+                
+                if start_str:
+                    try:
+                        end_hour, end_minute = map(int, end_time.split(':'))
+                        end_minutes = end_hour * 60 + end_minute
+                        
+                        start_hour, start_minute = map(int, start_str.split(':'))
+                        start_minutes = start_hour * 60 + start_minute
+                        
+                        print(f"   🔍 루프 필터링 체크: day={day}, days_count={days_count}, start={start_str} ({start_minutes}분) vs end_time={end_time} ({end_minutes}분)")
+                        
+                        if start_minutes > end_minutes:
+                            print(f"\n   [{idx}/{len(schedule_frame)}] 🚫 end_time 필터링: {day}일차 {time_slot} (시작 {start_str} > end_time {end_time})")
+                            continue
+                        else:
+                            print(f"   ✅ 포함: {day}일차 {time_slot} (시작 {start_str} <= end_time {end_time})")
+                    except (ValueError, IndexError) as e:
+                        print(f"   ⚠️ 시간 파싱 실패: start_str={start_str}, end_time={end_time}, 에러={e}")
+                        pass
+                else:
+                    print(f"   ⚠️ 시작 시간 추출 실패: time_slot={time_slot}")
+            elif not end_time:
+                print(f"   ⚠️ end_time 없음: end_time={end_time}")
+            elif not days_count:
+                print(f"   ⚠️ days_count 없음: days_count={days_count}")
+            elif day != days_count:
+                pass  # 마지막 날이 아니면 필터링 불필요
             
             # 🚫 키워드에서 찜질방/사우나 관련 단어 제거
             unwanted_keywords = ['찜질방', '사우나', '목욕탕', '스파', '대중탕', '실내온천', '찜질']
@@ -1228,6 +1264,10 @@ JSON 형식으로만 답변:
                 print(f"      ❌ 검색 실패: {e}")
                 continue
         
+        # end_time 필터링 적용 (최종 결과에서도 한 번 더 확인)
+        if end_time and days_count:
+            schedule = self._filter_schedule_by_end_time(schedule, days_count, end_time)
+        
         print(f"\n✅ 장소 선택 완료: {len(schedule)}개")
         if total_distance > 0:
             print(f"   📍 총 이동 거리: {total_distance:.1f}km")
@@ -1245,6 +1285,86 @@ JSON 형식으로만 답변:
                 item['blog_reviews'] = []
         
         return schedule
+    
+    def _filter_schedule_by_end_time(
+        self,
+        schedule: List[Dict[str, Any]],
+        days_count: int,
+        end_time: str
+    ) -> List[Dict[str, Any]]:
+        """
+        최종 스케줄에서 end_time 이후 시간대 필터링
+        """
+        if not schedule or not end_time or not days_count:
+            print(f"   ⚠️ 필터링 스킵: schedule={len(schedule) if schedule else 0}, end_time={end_time}, days_count={days_count}")
+            return schedule
+        
+        try:
+            # end_time을 분으로 변환
+            end_hour, end_minute = map(int, end_time.split(':'))
+            end_minutes = end_hour * 60 + end_minute
+            
+            print(f"   🔍 enhanced 필터링 시작: end_time={end_time} ({end_minutes}분), days_count={days_count}, 항목 수={len(schedule)}")
+            
+            filtered = []
+            filtered_count = 0
+            
+            for item in schedule:
+                day = item.get('day', 1)
+                time_slot = item.get('time_slot', '')
+                time = item.get('time', '')  # 시작 시간
+                
+                # 마지막 날이 아니면 모두 포함
+                if day != days_count:
+                    filtered.append(item)
+                    continue
+                
+                # 마지막 날인 경우 end_time 체크
+                # time_slot 또는 time에서 시작 시간 추출
+                start_str = None
+                if time_slot and '-' in time_slot:
+                    start_str = time_slot.split('-')[0].strip()
+                elif time:
+                    start_str = time.strip()
+                
+                if not start_str:
+                    # 시간 정보가 없으면 포함 (안전하게 처리)
+                    print(f"   ⚠️ 시간 정보 없음: day={day}, 포함")
+                    filtered.append(item)
+                    continue
+                
+                try:
+                    start_hour, start_minute = map(int, start_str.split(':'))
+                    start_minutes = start_hour * 60 + start_minute
+                    
+                    print(f"   🔍 enhanced 시간 비교: day={day}, 시작={start_str} ({start_minutes}분) vs end_time={end_time} ({end_minutes}분)")
+                    
+                    # 시작 시간이 end_time 이후이면 제외
+                    if start_minutes > end_minutes:
+                        print(f"   🚫 최종 필터링: {day}일차 {time_slot or time} (시작 {start_str} > end_time {end_time})")
+                        filtered_count += 1
+                        continue
+                    else:
+                        print(f"   ✅ 포함: {day}일차 {time_slot or time} (시작 {start_str} <= end_time {end_time})")
+                    
+                    filtered.append(item)
+                except (ValueError, IndexError) as e:
+                    # 시간 파싱 실패 시 포함 (안전하게 처리)
+                    print(f"   ⚠️ 시간 파싱 실패: {start_str}, 에러: {e}, 포함")
+                    filtered.append(item)
+            
+            if filtered_count > 0:
+                print(f"   ✅ 최종 end_time 필터링: {filtered_count}개 제외, {len(filtered)}개 유지")
+            else:
+                print(f"   ℹ️ 필터링된 항목 없음: {len(filtered)}개 유지")
+            
+            return filtered
+            
+        except Exception as e:
+            print(f"   ⚠️ 최종 end_time 필터링 실패: {e}, 원본 반환")
+            import traceback
+            print(traceback.format_exc())
+            return schedule
     
     async def _search_places_nearby_raw(
         self,
